@@ -12,7 +12,8 @@ authors = [
   {name = "Johannes Poms"}
 ]
 dependencies = [
-  "torch==2.8.0"
+  "numpy>=2.4.3",
+  "torch==2.8.0",
 ]
 
 # target torch to cuda 12.8 or CPU

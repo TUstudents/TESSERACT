@@ -1,7 +1,8 @@
 """Trace critic and repair loop scaffolding."""
 
 from .differential import DifferentialCritic, ProgramExecution
-from .interface import Critic
+from .interface import Critic, CriticInput
+from .loop import RepairAttempt, RepairContext, RepairLoopController, RepairLoopMetrics, RepairLoopResult, evaluate_repair_loop
 from .invariants import (
     FinalMemoryInvariant,
     FinalRegisterInvariant,
@@ -16,6 +17,7 @@ from .schema import CriticReport, FailureType, InvariantViolation, TraceStatus, 
 
 __all__ = [
     "Critic",
+    "CriticInput",
     "TraceStatus",
     "FailureType",
     "TraceSummary",
@@ -32,4 +34,10 @@ __all__ = [
     "build_repair_prompt",
     "ProgramExecution",
     "DifferentialCritic",
+    "RepairContext",
+    "RepairAttempt",
+    "RepairLoopResult",
+    "RepairLoopMetrics",
+    "RepairLoopController",
+    "evaluate_repair_loop",
 ]

@@ -10,10 +10,11 @@ A compiler–executor language model architecture that separates continuous sema
 ## Repo layout
 
 - `docs/` — design documents and implementation planning
-- `src/tesseract/backbone/` — semantic backbone interfaces
-- `src/tesseract/compiler/` — latent compiler interfaces
+- `src/tesseract/backbone/` — backbone interfaces, NL task data, and rule-based backbone baselines
+- `src/tesseract/compiler/` — latent compiler interfaces and NL-conditioned compiler path
 - `src/tesseract/vm/` — exact virtual machine and IR
-- `src/tesseract/critic/` — trace critic and repair loop
+- `src/tesseract/critic/` — trace critic and repair loop controller
+- `src/tesseract/evaluation/` — reproducibility, benchmark, and reporting helpers
 - `tests/` — unit and integration tests
 
 ## Development
@@ -47,4 +48,4 @@ Current reference-VM policy:
 
 ## Status
 
-The repository now includes a tested VM/IR core, validation/assembly/serialization tooling, a synthetic compiler baseline, and a trace critic scaffold. The current compiler baseline is a count-based autoregressive placeholder rather than a neural decoder, so the next major compiler milestone is improving that autoregressive path and connecting it to later repair and NL compilation phases.
+The repository now includes a tested VM/IR core, validation/assembly/serialization tooling, a synthetic compiler baseline, a rule-based NL backbone path, a deterministic repair loop scaffold, and reproducible benchmark/reporting helpers. The current compiler baseline is still a count-based autoregressive placeholder rather than a neural decoder, so the next major compiler milestone is upgrading that decoder while preserving the now-wired NL, repair, and evaluation plumbing.

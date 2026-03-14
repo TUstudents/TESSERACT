@@ -13,24 +13,27 @@ Related documents:
 
 ## Summary
 
-The repository has completed the first five implemented stages of the roadmap:
+The repository has completed the full prototype roadmap currently tracked in the implementation plan:
 
 - Phase 0 — repository bootstrap and test harness hardening
 - Phase 1 — typed IR and exact VM core
 - Phase 2 — static analysis, assembler, and serialization
 - Phase 3 — synthetic task corpus and compiler baseline
 - Phase 4 — trace capture, critic scaffolding, and repair diagnostics
+- Phase 5 — natural-language compilation path
+- Phase 6 — iterative repair loop
+- Phase 7 — performance, reproducibility, and evaluation hardening
 
-At this point, TESSERACT is no longer only a scaffold. It now contains a tested Python reference VM, a typed instruction representation, static program validation, an assembler/disassembler, JSON serialization for key VM artifacts, deterministic replay support, a synthetic autoregressive compiler baseline, and a differential critic scaffold.
+At this point, TESSERACT is no longer only a scaffold. It now contains a tested Python reference VM, a typed instruction representation, static program validation, an assembler/disassembler, JSON serialization for key VM artifacts, deterministic replay support, a synthetic autoregressive compiler baseline, a differential critic scaffold, a rule-based NL backbone path, a deterministic repair loop controller, and a reproducible benchmark/reporting layer.
 
-The current compiler baseline should be understood as a count-based autoregressive placeholder rather than a neural decoder. It is useful for corpus, tokenization, validation, and evaluation plumbing, but not yet for meaningful generalization.
+The current compiler baseline should still be understood as a count-based autoregressive placeholder rather than a neural decoder. It is useful for corpus, tokenization, validation, repair-loop wiring, and evaluation plumbing, but not yet for meaningful generalization.
 
-The remaining major architecture pieces are still intentionally unimplemented:
+The remaining major architecture pieces are now mostly depth and learning-quality gaps rather than missing subsystem stubs:
 
-- semantic backbone implementation
-- iterative repair loop controller
-- natural-language compilation
-- performance/reproducibility hardening
+- stronger learned backbone implementations
+- stronger learned compiler architectures beyond the current baseline
+- learned repair policies and critic models
+- broader benchmark/task coverage and performance optimization
 
 ---
 
@@ -267,18 +270,75 @@ The VM package now exposes a usable public API for:
 - assembly/disassembly
 - serialization and replay
 
+### 9. Backbone and NL task path
+
+Implemented in:
+
+- `src/tesseract/backbone/interface.py`
+- `src/tesseract/backbone/rule_based.py`
+- `src/tesseract/backbone/datasets.py`
+- `src/tesseract/compiler/nl.py`
+
+Current backbone/NL support includes:
+
+- `Backbone` protocol
+- `BackboneOutput` semantic-conditioning object
+- `RuleBasedBackbone` for tightly scoped arithmetic/max/sum-to-n prompts
+- `NaturalLanguageTask` dataset schema with gold IR and expected outputs
+- deterministic prompt normalization into canonical compiler prompts
+- end-to-end NL → canonical prompt → IR → VM execution plumbing
+
+Current scope is intentionally narrow and exactness still comes from VM execution rather than direct answer generation.
+
+### 10. Repair loop controller
+
+Implemented in:
+
+- `src/tesseract/critic/loop.py`
+
+Current repair-loop support includes:
+
+- `RepairContext`
+- `RepairAttempt`
+- `RepairLoopResult`
+- `RepairLoopController`
+- oscillation detection
+- max-round termination
+- repair-loop aggregate metrics
+
+The current repair path is deterministic scaffold logic around the existing compiler/critic stack, not yet a learned repair policy.
+
+### 11. Reproducibility and benchmarking helpers
+
+Implemented in:
+
+- `src/tesseract/evaluation/reproducibility.py`
+- `src/tesseract/evaluation/benchmark.py`
+- `src/tesseract/evaluation/reporting.py`
+
+Current evaluation hardening support includes:
+
+- global seed control
+- fixed NL benchmark suite generation
+- machine-readable benchmark reports
+- human-readable benchmark summaries
+- execution-backed benchmark metrics for NL tasks
+
 ---
 
 ## Test Status
 
-Current test coverage spans the VM, VM tooling, compiler baseline, critic scaffold, and package import paths.
+Current test coverage spans the VM, VM tooling, compiler baseline, NL backbone path, repair loop scaffold, evaluation helpers, and package import paths.
 
 Key test files:
 
 - `tests/test_vm.py`
 - `tests/test_vm_tooling.py`
 - `tests/test_compiler_baseline.py`
+- `tests/test_backbone_pipeline.py`
 - `tests/test_critic.py`
+- `tests/test_repair_loop.py`
+- `tests/test_evaluation.py`
 - `tests/test_package.py`
 
 Covered areas:
@@ -302,7 +362,10 @@ Covered areas:
 - replay consistency
 - synthetic task generation and execution agreement
 - compiler tokenization/training/evaluation behavior
+- NL prompt normalization and end-to-end execution
 - critic differencing and invariant reporting
+- repair-loop success, oscillation, and metrics behavior
+- reproducible benchmark generation and report serialization
 - package import smoke tests
 
 Validated commands:
@@ -317,7 +380,7 @@ uv run mypy
 
 ## What Is Still Missing
 
-The following major architecture pieces are not yet implemented.
+The following major architecture pieces are still incomplete in depth, scale, or learning sophistication.
 
 ### Compiler training pipeline
 
@@ -344,40 +407,57 @@ Implemented baseline pieces:
 - structured critic reports
 - invariant instrumentation layer
 - repair-prompt scaffolding
+- deterministic repair-loop controller integration
 
 Still missing:
 
 - learned failure classifiers
 - critic training loop
-- integration with a full repair controller
+- richer trace summarization and compression
 
 ### Natural-language path
 
-Missing:
+Implemented baseline pieces:
 
-- backbone implementation
-- NL-to-IR datasets
-- prompt conditioning interface
-- sequence/string opcodes for language-grounded tasks
-- end-to-end NL compilation benchmarks
+- backbone implementation via protocol + rule-based baseline
+- NL-to-IR dataset schema and generators
+- prompt conditioning interface into the compiler
+- end-to-end NL compilation benchmarks on tightly scoped tasks
+
+Still missing:
+
+- learned backbone models
+- broader NL task coverage
+- sequence/string opcode extensions for richer language tasks
 
 ### Repair loop
 
-Missing:
+Implemented baseline pieces:
 
 - repair context schema
-- repair-conditioned recompilation
+- repair-conditioned recompilation hook
 - multi-round loop controller
 - repair metrics and convergence analysis
 
+Still missing:
+
+- learned repair policies
+- stronger repair-context compression
+- larger repair benchmarks with harder corruptions
+
 ### Reproducibility and benchmarking layer
 
-Missing:
+Implemented baseline pieces:
 
-- fixed benchmark suites
-- experiment artifact management
-- benchmark reporting
-- performance profiling documentation
+- fixed-seed controls
+- fixed NL benchmark suite generation
+- benchmark reporting in JSON/text forms
+
+Still missing:
+
+- richer experiment artifact/version tracking
+- deeper performance profiling documentation
+- benchmark freeze/version management beyond the initial helpers
 
 ---
 
@@ -407,28 +487,28 @@ These are present as early prototypes but not yet at full design depth:
 
 These remain future work:
 
-- semantic backbone
+- learned semantic backbone models beyond the rule-based baseline
 - stronger learned compiler architectures beyond the current baseline
-- full repair loop controller
-- natural-language compilation
+- learned critic and repair policies
+- broader language-grounded IR/task coverage
 
 ---
 
 ## Recommended Next Step
 
-The next planned phase is:
+The next recommended milestone is not a new missing subsystem, but a quality upgrade of the learned components already scaffolded.
 
-### Phase 5 — Natural-language compilation path
+### Suggested follow-on focus — Learned backbone/compiler replacement
 
 Recommended implementation order:
 
-1. implement a backbone interface beyond package stubs
-2. define a minimal NL-to-IR dataset format
-3. connect prompt understanding to the existing autoregressive compiler path
-4. preserve validation/critic hooks in end-to-end execution
-5. keep testing centered on exact VM-backed outputs
+1. replace the count-based compiler baseline with a true neural autoregressive decoder
+2. replace the rule-based backbone with a learned semantic encoder while preserving the current interface
+3. keep the repair loop and benchmark harness fixed while swapping in learned components
+4. extend held-out/OOD benchmarks so improvements reflect generalization rather than memorization
+5. only then broaden task families and opcode coverage further
 
-This keeps development aligned with the design principle of stabilizing exact execution before introducing broader language grounding.
+This keeps development aligned with the design principle of stabilizing exact execution and observable diagnostics before scaling the learned stack.
 
 ---
 
@@ -445,7 +525,10 @@ In practical terms, the repository currently provides:
 - JSON serialization
 - deterministic replay
 - a synthetic autoregressive compiler baseline
+- a rule-based NL backbone path and NL task datasets
 - a differential critic scaffold with invariants and repair-prompt support
+- a deterministic repair-loop controller
+- reproducibility and benchmark/report helpers
 - working development and CI tooling
 
-The project is ready to move from systems scaffolding into richer compiler and natural-language experiments.
+The project is ready to move from scaffolding-complete prototyping into replacing the placeholder learned components with stronger models.
