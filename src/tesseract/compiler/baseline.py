@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Sequence
+
+import torch
+from torch import Tensor, nn
 
 from tesseract.compiler.interface import Compiler
 from tesseract.compiler.synthetic import SyntheticTask
@@ -32,6 +36,10 @@ class PromptVocabulary:
     @property
     def size(self) -> int:
         return len(self.itos)
+
+    @property
+    def pad_id(self) -> int:
+        return self.stoi[self.pad_token]
 
     @property
     def unk_id(self) -> int:
@@ -240,7 +248,7 @@ class ProgramTokenizer:
 
 
 @dataclass
-class AutoregressiveCompilerModel:
+class CountBasedAutoregressiveCompilerModel:
     prompt_vocab: PromptVocabulary
     program_tokenizer: ProgramTokenizer
     exact_counts: dict[tuple[tuple[int, ...], tuple[int, ...]], Counter[int]] = field(
@@ -298,8 +306,8 @@ class AutoregressiveCompilerModel:
 
 
 @dataclass
-class AutoregressiveCompiler(Compiler):
-    model: AutoregressiveCompilerModel
+class CountBasedAutoregressiveCompiler(Compiler):
+    model: CountBasedAutoregressiveCompilerModel
     program_tokenizer: ProgramTokenizer
     max_decode_steps: int = 256
 
@@ -314,5 +322,240 @@ class AutoregressiveCompiler(Compiler):
         return self.model.decode(prompt, max_steps=self.max_decode_steps)
 
 
-TemplateCompilerModel = AutoregressiveCompilerModel
-TemplateCompiler = AutoregressiveCompiler
+class AutoregressiveCompilerModel(nn.Module):
+    def __init__(
+        self,
+        *,
+        prompt_vocab: PromptVocabulary,
+        program_tokenizer: ProgramTokenizer,
+        hidden_dim: int = 256,
+        learning_rate: float = 0.1,
+        max_prompt_length: int = 8,
+        max_prefix_length: int = 128,
+        conditioning_dim: int = 8,
+    ) -> None:
+        super().__init__()
+        vocabulary = program_tokenizer.vocabulary
+        if vocabulary is None:
+            raise ValueError("program tokenizer vocabulary is not initialized")
+        self.prompt_vocab = prompt_vocab
+        self.program_tokenizer = program_tokenizer
+        self.hidden_dim = hidden_dim
+        self.learning_rate = learning_rate
+        self.max_prompt_length = max_prompt_length
+        self.max_prefix_length = max_prefix_length
+        self.conditioning_dim = conditioning_dim
+        input_dim = (prompt_vocab.size * max_prompt_length) + (vocabulary.size * max_prefix_length) + conditioning_dim
+        self.decoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, vocabulary.size),
+        )
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        self.loss_fn = nn.CrossEntropyLoss()
+
+    @property
+    def device(self) -> torch.device:
+        return next(self.parameters()).device
+
+    @property
+    def vocabulary_size(self) -> int:
+        vocabulary = self.program_tokenizer.vocabulary
+        if vocabulary is None:
+            raise ValueError("program tokenizer vocabulary is not initialized")
+        return vocabulary.size
+
+    def config_dict(self) -> dict[str, float | int]:
+        return {
+            "hidden_dim": self.hidden_dim,
+            "learning_rate": self.learning_rate,
+            "max_prompt_length": self.max_prompt_length,
+            "max_prefix_length": self.max_prefix_length,
+            "conditioning_dim": self.conditioning_dim,
+        }
+
+    def forward_logits(
+        self,
+        prompt: str,
+        prefix_token_ids: Sequence[int],
+        conditioning: Sequence[float] | None = None,
+    ) -> Tensor:
+        if not prefix_token_ids:
+            raise ValueError("prefix_token_ids must not be empty")
+        feature_vector = self._feature_vector(prompt, prefix_token_ids, conditioning).unsqueeze(0)
+        return self.decoder(feature_vector).squeeze(0)
+
+    def sequence_loss(
+        self,
+        prompt: str,
+        target_token_ids: Sequence[int],
+        conditioning: Sequence[float] | None = None,
+    ) -> Tensor:
+        features, target_ids = self.encode_training_examples(prompt, target_token_ids, conditioning)
+        return self.loss_fn(self.batch_next_token_logits(features), target_ids)
+
+    def encode_training_examples(
+        self,
+        prompt: str,
+        target_token_ids: Sequence[int],
+        conditioning: Sequence[float] | None = None,
+    ) -> tuple[Tensor, Tensor]:
+        if len(target_token_ids) < 2:
+            raise ValueError("target sequence must include at least <bos> and <eos>")
+        feature_rows = [
+            self._feature_vector(prompt, target_token_ids[:index], conditioning)
+            for index in range(1, len(target_token_ids))
+        ]
+        targets = torch.tensor(target_token_ids[1:], dtype=torch.long, device=self.device)
+        return torch.stack(feature_rows, dim=0), targets
+
+    def batch_next_token_logits(self, feature_batch: Tensor) -> Tensor:
+        return self.decoder(feature_batch)
+
+    def predict_next(
+        self,
+        prompt: str,
+        prefix: Sequence[int],
+        conditioning: Sequence[float] | None = None,
+    ) -> int:
+        with torch.no_grad():
+            logits = self.forward_logits(prompt, prefix, conditioning)
+            return int(torch.argmax(logits).item())
+
+    def decode(
+        self,
+        prompt: str,
+        *,
+        conditioning: Sequence[float] | None = None,
+        max_steps: int = 256,
+    ) -> list[int]:
+        vocabulary = self.program_tokenizer.vocabulary
+        if vocabulary is None:
+            raise ValueError("program tokenizer vocabulary is not initialized")
+        self.eval()
+        generated = [vocabulary.bos_id]
+        with torch.no_grad():
+            for _ in range(max_steps):
+                next_token = self.predict_next(prompt, generated, conditioning)
+                generated.append(next_token)
+                if next_token == vocabulary.eos_id:
+                    break
+        return generated
+
+    def _feature_vector(
+        self,
+        prompt: str,
+        prefix_token_ids: Sequence[int],
+        conditioning: Sequence[float] | None = None,
+    ) -> Tensor:
+        prompt_features = self._position_one_hot(
+            self.prompt_vocab.encode(prompt),
+            vocabulary_size=self.prompt_vocab.size,
+            max_length=self.max_prompt_length,
+        )
+        prefix_features = self._position_one_hot(
+            prefix_token_ids,
+            vocabulary_size=self.vocabulary_size,
+            max_length=self.max_prefix_length,
+        )
+        conditioning_features = self._conditioning_features(conditioning)
+        return torch.cat((prompt_features, prefix_features, conditioning_features), dim=0)
+
+    def _position_one_hot(
+        self,
+        token_ids: Sequence[int],
+        *,
+        vocabulary_size: int,
+        max_length: int,
+    ) -> Tensor:
+        features = torch.zeros(max_length * vocabulary_size, device=self.device)
+        for position, token_id in enumerate(token_ids[:max_length]):
+            features[(position * vocabulary_size) + token_id] = 1.0
+        return features
+
+    def _conditioning_features(self, conditioning: Sequence[float] | None) -> Tensor:
+        features = torch.zeros(self.conditioning_dim, dtype=torch.float32, device=self.device)
+        if conditioning is None:
+            return features
+        limit = min(len(conditioning), self.conditioning_dim)
+        if limit:
+            features[:limit] = torch.tensor(conditioning[:limit], dtype=torch.float32, device=self.device)
+        return features
+
+
+@dataclass
+class AutoregressiveCompiler(Compiler):
+    model: AutoregressiveCompilerModel
+    program_tokenizer: ProgramTokenizer
+    max_decode_steps: int = 256
+
+    def compile(self, prompt: str) -> Sequence[Instruction]:
+        token_ids = self.model.decode(prompt, max_steps=self.max_decode_steps)
+        try:
+            return self.program_tokenizer.decode_tokens(token_ids)
+        except ValidationError:
+            return ()
+
+    def compile_conditioned(
+        self,
+        prompt: str,
+        conditioning: Sequence[float] | None = None,
+    ) -> Sequence[Instruction]:
+        if conditioning is None:
+            return self.compile(prompt)
+        token_ids = self.model.decode(prompt, conditioning=conditioning, max_steps=self.max_decode_steps)
+        try:
+            return self.program_tokenizer.decode_tokens(token_ids)
+        except ValidationError:
+            return ()
+
+    def predict_token_ids(
+        self,
+        prompt: str,
+        conditioning: Sequence[float] | None = None,
+    ) -> list[int]:
+        if conditioning is None:
+            return self.model.decode(prompt, max_steps=self.max_decode_steps)
+        return self.model.decode(prompt, conditioning=conditioning, max_steps=self.max_decode_steps)
+
+    def save_checkpoint(self, path: str | Path) -> None:
+        vocabulary = self.program_tokenizer.vocabulary
+        if vocabulary is None:
+            raise ValueError("program tokenizer vocabulary is not initialized")
+        payload = {
+            "prompt_vocab": asdict(self.model.prompt_vocab),
+            "program_vocab": asdict(vocabulary),
+            "model_config": self.model.config_dict(),
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.model.optimizer.state_dict(),
+            "max_decode_steps": self.max_decode_steps,
+        }
+        torch.save(payload, Path(path))
+
+    @classmethod
+    def load_checkpoint(cls, path: str | Path) -> AutoregressiveCompiler:
+        payload = torch.load(Path(path), map_location="cpu", weights_only=False)
+        prompt_vocab = PromptVocabulary(**payload["prompt_vocab"])
+        program_vocab = ProgramVocabulary(**payload["program_vocab"])
+        program_tokenizer = ProgramTokenizer(program_vocab)
+        model = AutoregressiveCompilerModel(
+            prompt_vocab=prompt_vocab,
+            program_tokenizer=program_tokenizer,
+            hidden_dim=int(payload["model_config"]["hidden_dim"]),
+            learning_rate=float(payload["model_config"]["learning_rate"]),
+            max_prompt_length=int(payload["model_config"].get("max_prompt_length", 8)),
+            max_prefix_length=int(payload["model_config"].get("max_prefix_length", 128)),
+            conditioning_dim=int(payload["model_config"].get("conditioning_dim", 8)),
+        )
+        model.load_state_dict(payload["model_state_dict"])
+        model.optimizer.load_state_dict(payload["optimizer_state_dict"])
+        model.eval()
+        return cls(
+            model=model,
+            program_tokenizer=program_tokenizer,
+            max_decode_steps=int(payload["max_decode_steps"]),
+        )
+
+
+TemplateCompilerModel = CountBasedAutoregressiveCompilerModel
+TemplateCompiler = CountBasedAutoregressiveCompiler

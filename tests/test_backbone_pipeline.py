@@ -4,8 +4,16 @@ from types import MethodType
 from typing import Any, cast
 
 import pytest
+import torch
 
-from tesseract.backbone import RuleBasedBackbone, generate_nl_tasks
+from tesseract.backbone import (
+    LearnedBackbone,
+    RuleBasedBackbone,
+    build_backbone_training_batch,
+    build_learned_backbone,
+    generate_nl_tasks,
+    train_backbone_step,
+)
 from tesseract.compiler import build_training_batch, build_vocabularies, train_step
 from tesseract.compiler.nl import BackboneConditionedCompiler
 from tesseract.critic import DifferentialCritic
@@ -28,6 +36,42 @@ def _build_trained_nl_compiler() -> BackboneConditionedCompiler:
     )
     train_step(artifacts.compiler.model, batch)
     return BackboneConditionedCompiler(backbone=RuleBasedBackbone(), compiler=artifacts.compiler)
+
+
+def _build_trained_learned_backbone() -> LearnedBackbone:
+    nl_tasks = generate_nl_tasks(
+        task_types=("arithmetic", "max", "sum_to_n"),
+        operations=("add", "sub"),
+        values=(1, 2, 3),
+        seed=0,
+        include_all_prompt_variants=True,
+    )
+    backbone = build_learned_backbone(nl_tasks)
+    batch = build_backbone_training_batch(nl_tasks, canonical_vocabulary=backbone.model.canonical_vocabulary)
+    train_backbone_step(backbone.model, batch)
+    return backbone
+
+
+def _build_trained_learned_nl_compiler() -> BackboneConditionedCompiler:
+    nl_tasks = generate_nl_tasks(
+        task_types=("arithmetic", "max", "sum_to_n"),
+        operations=("add", "sub"),
+        values=(1, 2, 3),
+        seed=0,
+        include_all_prompt_variants=True,
+    )
+    backbone = _build_trained_learned_backbone()
+    synthetic_tasks = [task.to_synthetic_task() for task in nl_tasks]
+    conditioning_vectors = [list(backbone.encode(task.prompt).conditioning) for task in nl_tasks]
+    artifacts = build_vocabularies(synthetic_tasks)
+    batch = build_training_batch(
+        synthetic_tasks,
+        prompt_vocab=artifacts.prompt_vocab,
+        program_tokenizer=artifacts.program_tokenizer,
+        conditioning_vectors=conditioning_vectors,
+    )
+    train_step(artifacts.compiler.model, batch)
+    return BackboneConditionedCompiler(backbone=backbone, compiler=artifacts.compiler)
 
 
 def test_rule_based_backbone_encodes_supported_prompts() -> None:
@@ -73,6 +117,44 @@ def test_rule_based_backbone_covers_all_supported_prompt_variants(
     assert output.canonical_prompt == canonical_prompt
 
 
+def test_learned_backbone_overfits_scoped_nl_tasks() -> None:
+    backbone = _build_trained_learned_backbone()
+    tasks = generate_nl_tasks(
+        task_types=("arithmetic", "max", "sum_to_n"),
+        operations=("add", "sub"),
+        values=(1, 2, 3),
+        seed=0,
+    )
+
+    outputs = [backbone.encode(task.prompt) for task in tasks]
+
+    assert {output.canonical_prompt for output in outputs} == {task.canonical_prompt for task in tasks}
+    assert all(len(output.conditioning) == backbone.model.conditioning_dim for output in outputs)
+
+
+def test_learned_backbone_training_is_seed_reproducible() -> None:
+    tasks = generate_nl_tasks(
+        task_types=("arithmetic", "max", "sum_to_n"),
+        operations=("add", "sub"),
+        values=(1, 2),
+        seed=0,
+    )
+
+    torch.manual_seed(123)
+    first = build_learned_backbone(tasks)
+    first_batch = build_backbone_training_batch(tasks, canonical_vocabulary=first.model.canonical_vocabulary)
+    train_backbone_step(first.model, first_batch, epochs=64)
+    first_prompts = [first.encode(task.prompt).canonical_prompt for task in tasks]
+
+    torch.manual_seed(123)
+    second = build_learned_backbone(tasks)
+    second_batch = build_backbone_training_batch(tasks, canonical_vocabulary=second.model.canonical_vocabulary)
+    train_backbone_step(second.model, second_batch, epochs=64)
+    second_prompts = [second.encode(task.prompt).canonical_prompt for task in tasks]
+
+    assert first_prompts == second_prompts
+
+
 def test_backbone_conditioned_compiler_runs_end_to_end_on_nl_tasks() -> None:
     compiler = _build_trained_nl_compiler()
     vm = VM()
@@ -88,6 +170,43 @@ def test_backbone_conditioned_compiler_runs_end_to_end_on_nl_tasks() -> None:
         validate_program(result.program)
         assert result.output == task.expected_output
         assert result.backbone_output.canonical_prompt == task.canonical_prompt
+
+
+def test_learned_backbone_conditioned_compiler_runs_end_to_end_on_nl_tasks() -> None:
+    compiler = _build_trained_learned_nl_compiler()
+    assert isinstance(compiler.backbone, LearnedBackbone)
+    vm = VM()
+    tasks = generate_nl_tasks(
+        task_types=("arithmetic", "max", "sum_to_n"),
+        operations=("add", "sub"),
+        values=(1, 2),
+        seed=0,
+    )
+
+    for task in tasks:
+        result = compiler.execute(task.prompt, vm=vm)
+        validate_program(result.program)
+        assert result.output == task.expected_output
+        assert result.backbone_output.canonical_prompt == task.canonical_prompt
+        assert len(result.backbone_output.conditioning) == compiler.backbone.model.conditioning_dim
+
+
+def test_backbone_conditioned_compiler_passes_learned_conditioning_to_compiler() -> None:
+    compiler = _build_trained_learned_nl_compiler()
+    captured: dict[str, object] = {}
+    original_compile_conditioned = compiler.compiler.compile_conditioned
+
+    def recording_compile_conditioned(prompt: str, conditioning=None):
+        captured["prompt"] = prompt
+        captured["conditioning"] = conditioning
+        return original_compile_conditioned(prompt, conditioning)
+
+    cast(Any, compiler.compiler).compile_conditioned = recording_compile_conditioned
+    result = compiler.compile_with_backbone_output("What is 1 plus 2?")
+
+    assert captured["prompt"] == result.backbone_output.canonical_prompt
+    assert captured["conditioning"] == result.backbone_output.conditioning
+    assert result.backbone_output.conditioning
 
 
 def test_nl_pipeline_depends_on_emitted_ir_execution() -> None:

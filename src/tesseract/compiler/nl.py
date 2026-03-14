@@ -55,7 +55,8 @@ class BackboneConditionedCompiler:
     ) -> NaturalLanguageCompileResult:
         repair_hint = repair_context.repair_prompt if repair_context is not None else None
         backbone_output = self.backbone.encode(prompt, repair_hint=repair_hint)
-        program = tuple(self.compiler.compile(backbone_output.canonical_prompt))
+        conditioning = backbone_output.conditioning or None
+        program = tuple(self.compiler.compile_conditioned(backbone_output.canonical_prompt, conditioning))
         return NaturalLanguageCompileResult(backbone_output=backbone_output, program=program)
 
     def repair_compile(

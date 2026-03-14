@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 from .baseline import (
     AutoregressiveCompiler,
     AutoregressiveCompilerModel,
+    CountBasedAutoregressiveCompiler,
+    CountBasedAutoregressiveCompilerModel,
     ProgramTokenizer,
     ProgramVocabulary,
     PromptVocabulary,
@@ -69,6 +71,8 @@ __all__ = [
     "PromptVocabulary",
     "ProgramVocabulary",
     "ProgramTokenizer",
+    "CountBasedAutoregressiveCompilerModel",
+    "CountBasedAutoregressiveCompiler",
     "AutoregressiveCompilerModel",
     "AutoregressiveCompiler",
     "CompilerArtifacts",

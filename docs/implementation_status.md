@@ -24,13 +24,13 @@ The repository has completed the full prototype roadmap currently tracked in the
 - Phase 6 — iterative repair loop
 - Phase 7 — performance, reproducibility, and evaluation hardening
 
-At this point, TESSERACT is no longer only a scaffold. It now contains a tested Python reference VM, a typed instruction representation, static program validation, an assembler/disassembler, JSON serialization for key VM artifacts, deterministic replay support, a synthetic autoregressive compiler baseline, a differential critic scaffold, a rule-based NL backbone path, a deterministic repair loop controller, and a reproducible benchmark/reporting layer.
+At this point, TESSERACT is no longer only a scaffold. It now contains a tested Python reference VM, a typed instruction representation, static program validation, an assembler/disassembler, JSON serialization for key VM artifacts, deterministic replay support, a synthetic compiler stack with a small neural autoregressive decoder and a retained count-based comparison baseline, a differential critic scaffold, both rule-based and learned NL backbone paths, a deterministic repair loop controller, and a reproducible benchmark/reporting layer.
 
-The current compiler baseline should still be understood as a count-based autoregressive placeholder rather than a neural decoder. It is useful for corpus, tokenization, validation, repair-loop wiring, and evaluation plumbing, but not yet for meaningful generalization.
+The current neural compiler should still be understood as a small prototype decoder rather than a strong research-grade compiler architecture. It is sufficient for sequence modeling, checkpointing, validation, repair-loop wiring, and evaluation plumbing, but broader task scope and stronger learned conditioning remain future work.
 
 The remaining major architecture pieces are now mostly depth and learning-quality gaps rather than missing subsystem stubs:
 
-- stronger learned backbone implementations
+- stronger learned backbone implementations beyond the current small prototype
 - stronger learned compiler architectures beyond the current baseline
 - learned repair policies and critic models
 - broader benchmark/task coverage and performance optimization
@@ -388,14 +388,15 @@ Implemented baseline pieces:
 
 - synthetic dataset generators
 - gold IR corpora in task objects
-- count-based autoregressive token-sequence compiler baseline
-- training-step scaffold for compiler supervision
+- small neural autoregressive token-sequence compiler
+- retained count-based baseline for comparison
+- checkpoint save/load support
 - compiler evaluation metrics
 
 Still missing:
 
 - stronger variable-length corpora beyond the initial arithmetic/branch/loop mix
-- richer decoder architectures
+- richer decoder architectures beyond the current small prototype
 - large-scale train/eval harnesses
 
 ### Critic subsystem
@@ -420,13 +421,14 @@ Still missing:
 Implemented baseline pieces:
 
 - backbone implementation via protocol + rule-based baseline
+- small learned backbone prototype with trainable prompt classification and compiler conditioning vectors
 - NL-to-IR dataset schema and generators
-- prompt conditioning interface into the compiler
+- prompt conditioning interface into the compiler, including direct conditioning vectors for the neural compiler
 - end-to-end NL compilation benchmarks on tightly scoped tasks
 
 Still missing:
 
-- learned backbone models
+- stronger learned backbone models beyond the current small prototype
 - broader NL task coverage
 - sequence/string opcode extensions for richer language tasks
 
@@ -487,8 +489,8 @@ These are present as early prototypes but not yet at full design depth:
 
 These remain future work:
 
-- learned semantic backbone models beyond the rule-based baseline
-- stronger learned compiler architectures beyond the current baseline
+- stronger learned semantic backbone models beyond the current small prototype
+- stronger learned compiler architectures beyond the current small prototype decoder
 - learned critic and repair policies
 - broader language-grounded IR/task coverage
 
@@ -498,15 +500,15 @@ These remain future work:
 
 The next recommended milestone is not a new missing subsystem, but a quality upgrade of the learned components already scaffolded.
 
-### Suggested follow-on focus — Learned backbone/compiler replacement
+### Suggested follow-on focus — Learned backbone/compiler strengthening
 
 Recommended implementation order:
 
-1. replace the count-based compiler baseline with a true neural autoregressive decoder
-2. replace the rule-based backbone with a learned semantic encoder while preserving the current interface
-3. keep the repair loop and benchmark harness fixed while swapping in learned components
-4. extend held-out/OOD benchmarks so improvements reflect generalization rather than memorization
-5. only then broaden task families and opcode coverage further
+1. broaden task families and held-out/OOD benchmarks so the new learned backbone/compiler path is tested beyond narrow arithmetic-style coverage
+2. keep the repair loop and benchmark harness fixed while strengthening the neural compiler/backbone path
+3. only then broaden opcode/value semantics further
+4. after that, push learned critic and repair upgrades
+5. finally deepen research-grade evaluation and profiling
 
 This keeps development aligned with the design principle of stabilizing exact execution and observable diagnostics before scaling the learned stack.
 
@@ -524,11 +526,12 @@ In practical terms, the repository currently provides:
 - assembly/disassembly
 - JSON serialization
 - deterministic replay
-- a synthetic autoregressive compiler baseline
-- a rule-based NL backbone path and NL task datasets
+- a small neural autoregressive compiler plus a retained count-based comparison baseline
+- compiler checkpointing and execution-backed compiler evaluation
+- rule-based and learned NL backbone paths plus NL task datasets
 - a differential critic scaffold with invariants and repair-prompt support
 - a deterministic repair-loop controller
 - reproducibility and benchmark/report helpers
 - working development and CI tooling
 
-The project is ready to move from scaffolding-complete prototyping into replacing the placeholder learned components with stronger models.
+The project is ready to move from scaffolding-complete prototyping into strengthening the learned backbone, broadening task scope, and improving critic/repair learning quality.

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from types import MethodType
 from typing import Any, cast
 
 import pytest
+import torch
 
 from tesseract.compiler import (
     AutoregressiveCompiler,
@@ -56,6 +58,32 @@ def test_training_step_returns_finite_loss() -> None:
     assert math.isfinite(metrics["sequence_error_rate"])
 
 
+def test_training_step_is_seed_reproducible() -> None:
+    tasks = generate_synthetic_tasks(task_types=("arithmetic",), operations=("add",), values=(0, 1))
+
+    torch.manual_seed(123)
+    first = build_vocabularies(tasks)
+    first_batch = build_training_batch(
+        tasks,
+        prompt_vocab=first.prompt_vocab,
+        program_tokenizer=first.program_tokenizer,
+    )
+    train_step(first.compiler.model, first_batch, epochs=32)
+    first_predictions = [first.compiler.predict_token_ids(task.prompt) for task in tasks]
+
+    torch.manual_seed(123)
+    second = build_vocabularies(tasks)
+    second_batch = build_training_batch(
+        tasks,
+        prompt_vocab=second.prompt_vocab,
+        program_tokenizer=second.program_tokenizer,
+    )
+    train_step(second.compiler.model, second_batch, epochs=32)
+    second_predictions = [second.compiler.predict_token_ids(task.prompt) for task in tasks]
+
+    assert first_predictions == second_predictions
+
+
 @pytest.fixture(scope="module")
 def trained_compiler() -> tuple[AutoregressiveCompiler, list]:
     tasks = generate_synthetic_tasks(task_types=("arithmetic", "max", "sum_to_n"), operations=("add", "sub"), values=range(0, 4))
@@ -83,6 +111,7 @@ def test_autoregressive_compiler_overfits_tiny_dataset(
     assert metrics.compile_validity_rate == pytest.approx(1.0)
     assert metrics.execution_success_rate == pytest.approx(1.0)
     assert metrics.trap_rate == pytest.approx(0.0)
+    assert metrics.token_accuracy == pytest.approx(1.0)
     assert metrics.average_program_length > 4.0
 
 
@@ -230,6 +259,28 @@ def test_control_flow_gold_programs_preserve_symbolic_labels() -> None:
     assert any(instruction.label is not None for instruction in sum_program if instruction.opcode in {"JGT", "JMP"})
 
 
+def test_neural_compiler_checkpoint_round_trip_preserves_predictions(tmp_path: Path) -> None:
+    tasks = generate_synthetic_tasks(task_types=("arithmetic",), operations=("add",), values=(0, 1, 2))
+    artifacts = build_vocabularies(tasks)
+    batch = build_training_batch(
+        tasks,
+        prompt_vocab=artifacts.prompt_vocab,
+        program_tokenizer=artifacts.program_tokenizer,
+    )
+    train_step(artifacts.compiler.model, batch)
+    checkpoint_path = tmp_path / "compiler.pt"
+
+    artifacts.compiler.save_checkpoint(checkpoint_path)
+    restored = AutoregressiveCompiler.load_checkpoint(checkpoint_path)
+
+    assert [restored.predict_token_ids(task.prompt) for task in tasks] == [
+        artifacts.compiler.predict_token_ids(task.prompt) for task in tasks
+    ]
+    assert [tuple(restored.compile(task.prompt)) for task in tasks] == [
+        tuple(artifacts.compiler.compile(task.prompt)) for task in tasks
+    ]
+
+
 def test_evaluation_metrics_are_bounded() -> None:
     tasks = generate_synthetic_tasks(task_types=("arithmetic",), operations=("add",), values=(0, 1, 2))
     artifacts = build_vocabularies(tasks)
@@ -246,6 +297,7 @@ def test_evaluation_metrics_are_bounded() -> None:
     assert 0.0 <= metrics.compile_validity_rate <= 1.0
     assert 0.0 <= metrics.execution_success_rate <= 1.0
     assert 0.0 <= metrics.trap_rate <= 1.0
+    assert 0.0 <= metrics.token_accuracy <= 1.0
     assert metrics.average_program_length > 0.0
 
 

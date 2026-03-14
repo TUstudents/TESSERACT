@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import torch
+
 from tesseract.compiler.baseline import (
     AutoregressiveCompiler,
     AutoregressiveCompilerModel,
@@ -18,6 +20,7 @@ class TrainingBatch:
     tasks: list[SyntheticTask]
     encoded_prompts: list[list[int]]
     encoded_programs: list[list[int]]
+    conditioning_vectors: list[list[float]] | None = None
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,7 @@ class EvaluationMetrics:
     execution_success_rate: float
     average_program_length: float
     trap_rate: float
+    token_accuracy: float
 
 
 @dataclass(frozen=True)
@@ -60,40 +64,60 @@ def build_training_batch(
     *,
     prompt_vocab: PromptVocabulary,
     program_tokenizer: ProgramTokenizer,
+    conditioning_vectors: list[list[float]] | None = None,
 ) -> TrainingBatch:
+    if conditioning_vectors is not None and len(conditioning_vectors) != len(tasks):
+        raise ValueError("conditioning_vectors must align one-to-one with tasks")
     return TrainingBatch(
         tasks=tasks,
         encoded_prompts=prompt_vocab.encode_batch([task.prompt for task in tasks]),
         encoded_programs=[program_tokenizer.encode_program(task.gold_program) for task in tasks],
+        conditioning_vectors=conditioning_vectors,
     )
 
 
 def train_step(
     model: AutoregressiveCompilerModel,
     batch: TrainingBatch,
+    *,
+    epochs: int = 256,
 ) -> dict[str, float]:
-    incorrect_tokens = 0
-    total_tokens = 0
+    if not batch.tasks:
+        return {"loss": 0.0, "sequence_error_rate": 0.0}
+
+    feature_batches: list[torch.Tensor] = []
+    target_batches: list[torch.Tensor] = []
+    conditioning_vectors = batch.conditioning_vectors or ([[]] * len(batch.tasks))
+    for task, gold_tokens, conditioning in zip(batch.tasks, batch.encoded_programs, conditioning_vectors, strict=True):
+        features, targets = model.encode_training_examples(task.prompt, gold_tokens, conditioning)
+        feature_batches.append(features)
+        target_batches.append(targets)
+
+    feature_batch = torch.cat(feature_batches, dim=0)
+    target_batch = torch.cat(target_batches, dim=0)
+
+    model.train()
+    final_loss = 0.0
+    for _ in range(epochs):
+        model.optimizer.zero_grad()
+        logits = model.batch_next_token_logits(feature_batch)
+        loss = model.loss_fn(logits, target_batch)
+        loss.backward()
+        model.optimizer.step()
+        final_loss = float(loss.detach().cpu().item())
+        if final_loss < 1e-4:
+            break
+
+    model.eval()
     incorrect_sequences = 0
-
-    for task, gold_tokens in zip(batch.tasks, batch.encoded_programs, strict=True):
-        predicted_tokens = model.decode(task.prompt)
-        sequence_match = predicted_tokens == gold_tokens
-        if not sequence_match:
+    for task, gold_tokens, conditioning in zip(batch.tasks, batch.encoded_programs, conditioning_vectors, strict=True):
+        predicted_tokens = model.decode(task.prompt, conditioning=conditioning)
+        if predicted_tokens != gold_tokens:
             incorrect_sequences += 1
-        limit = max(len(predicted_tokens), len(gold_tokens))
-        for index in range(limit):
-            predicted = predicted_tokens[index] if index < len(predicted_tokens) else None
-            gold = gold_tokens[index] if index < len(gold_tokens) else None
-            if predicted != gold:
-                incorrect_tokens += 1
-            total_tokens += 1
-
-    model.update(batch.tasks)
 
     total_examples = len(batch.tasks)
     return {
-        "loss": incorrect_tokens / total_tokens if total_tokens else 0.0,
+        "loss": final_loss,
         "sequence_error_rate": incorrect_sequences / total_examples if total_examples else 0.0,
     }
 
@@ -112,6 +136,7 @@ def evaluate_compiler(
             execution_success_rate=0.0,
             average_program_length=0.0,
             trap_rate=0.0,
+            token_accuracy=0.0,
         )
 
     machine = vm if vm is not None else VM()
@@ -121,8 +146,20 @@ def evaluate_compiler(
     execution_success = 0
     trap_count = 0
     total_program_length = 0
+    correct_tokens = 0
+    total_tokens = 0
 
     for task in tasks:
+        predicted_token_ids = compiler.predict_token_ids(task.prompt)
+        gold_token_ids = compiler.program_tokenizer.encode_program(task.gold_program)
+        limit = max(len(predicted_token_ids), len(gold_token_ids))
+        for index in range(limit):
+            predicted = predicted_token_ids[index] if index < len(predicted_token_ids) else None
+            gold = gold_token_ids[index] if index < len(gold_token_ids) else None
+            if predicted == gold:
+                correct_tokens += 1
+            total_tokens += 1
+
         program = tuple(compiler.compile(task.prompt))
         total_program_length += len(program)
 
@@ -156,4 +193,5 @@ def evaluate_compiler(
         execution_success_rate=execution_success / total,
         average_program_length=total_program_length / total,
         trap_rate=trap_count / total,
+        token_accuracy=correct_tokens / total_tokens if total_tokens else 0.0,
     )

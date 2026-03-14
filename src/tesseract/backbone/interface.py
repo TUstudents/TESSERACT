@@ -11,6 +11,7 @@ class BackboneOutput:
     task_type: str
     result_register: int
     values: tuple[int, ...] = ()
+    conditioning: tuple[float, ...] = ()
     metadata: dict[str, int | float | str | bool] = field(default_factory=dict)
 
 
