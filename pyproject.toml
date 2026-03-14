@@ -7,12 +7,12 @@ name = "tesseract"
 version = "0.1.0"
 description = "TESSERACT compiler-executor language model scaffold"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 authors = [
   {name = "Johannes Poms"}
 ]
 dependencies = [
-  "torch==2.9.1"
+  "torch==2.8.0"
 ]
 
 # target torch to cuda 12.8 or CPU
@@ -34,10 +34,10 @@ explicit = true
 
 [project.optional-dependencies]
 cpu = [
-    "torch==2.9.1",
+    "torch==2.8.0",
 ]
 gpu = [
-    "torch==2.9.1",
+    "torch==2.8.0",
 ]
 
 [dependency-groups]

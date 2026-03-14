@@ -1,1 +1,67 @@
-"""Latent compiler interfaces."""
+"""Latent compiler interfaces and synthetic baselines."""
+
+from .baseline import (
+    AutoregressiveCompiler,
+    AutoregressiveCompilerModel,
+    ProgramTokenizer,
+    ProgramVocabulary,
+    PromptVocabulary,
+)
+from .interface import Compiler
+from .synthetic import (
+    RESULT_REGISTER,
+    SyntheticTask,
+    TaskExecutionResult,
+    build_arithmetic_prompt,
+    build_gold_program,
+    build_max_program,
+    build_max_prompt,
+    build_sum_to_n_program,
+    build_sum_to_n_prompt,
+    evaluate_operation,
+    execute_task,
+    generate_synthetic_tasks,
+    make_max_task,
+    make_sum_to_n_task,
+    make_synthetic_task,
+)
+from .training import (
+    CompilerArtifacts,
+    EvaluationMetrics,
+    TrainingBatch,
+    build_training_batch,
+    build_vocabularies,
+    evaluate_compiler,
+    train_step,
+)
+
+__all__ = [
+    "Compiler",
+    "RESULT_REGISTER",
+    "SyntheticTask",
+    "TaskExecutionResult",
+    "build_arithmetic_prompt",
+    "build_gold_program",
+    "build_max_program",
+    "build_max_prompt",
+    "build_sum_to_n_program",
+    "build_sum_to_n_prompt",
+    "evaluate_operation",
+    "execute_task",
+    "generate_synthetic_tasks",
+    "make_max_task",
+    "make_sum_to_n_task",
+    "make_synthetic_task",
+    "PromptVocabulary",
+    "ProgramVocabulary",
+    "ProgramTokenizer",
+    "AutoregressiveCompilerModel",
+    "AutoregressiveCompiler",
+    "CompilerArtifacts",
+    "EvaluationMetrics",
+    "TrainingBatch",
+    "build_vocabularies",
+    "build_training_batch",
+    "train_step",
+    "evaluate_compiler",
+]

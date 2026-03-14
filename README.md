@@ -27,7 +27,6 @@ uv sync --group dev
 ### Run tests
 
 ```bash
-pytest -q
 uv run pytest -q
 ```
 
@@ -38,6 +37,14 @@ uv run ruff check .
 uv run mypy
 ```
 
+## VM semantics notes
+
+Current reference-VM policy:
+
+- unread registers are treated as zero-initialized
+- unread memory addresses are treated as zero-initialized
+- this is an explicit implementation choice for the current prototype and is covered by tests
+
 ## Status
 
-Early scaffold repository with a detailed implementation plan. Phase 0 bootstrap is now focused on packaging, development tooling, CI, and test harness hardening before work begins on the exact VM/IR core.
+The repository now includes a tested VM/IR core, validation/assembly/serialization tooling, a synthetic compiler baseline, and a trace critic scaffold. The next major compiler milestone is improving the autoregressive compiler path and connecting it to later repair and NL compilation phases.

@@ -4,6 +4,7 @@ from dataclasses import asdict
 
 import pytest
 
+from tesseract.vm import assemble
 from tesseract.vm.ir import Instruction
 from tesseract.vm.machine import Trap, VM
 from tesseract.vm.state import VMState
@@ -43,6 +44,17 @@ def test_mov_opcode(vm: VM) -> None:
     state = vm.execute(program)
 
     assert state.registers[1] == 11
+
+
+def test_default_register_values_are_zero(vm: VM) -> None:
+    program = [
+        Instruction("ADD", dst=0, src1=1, src2=2),
+        Instruction("HALT"),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.registers[0] == 0
 
 
 @pytest.mark.parametrize(
@@ -243,9 +255,33 @@ def test_timeout_trap() -> None:
         vm.execute(program)
 
 
+def test_program_without_halt_falls_off_end(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=7),
+        Instruction("CONST", dst=1, imm=8),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.registers[0] == 7
+    assert state.registers[1] == 8
+    assert state.pc == 2
+    assert state.halted is False
+    assert state.halt_reason is None
+
+
 def test_invalid_opcode_trap(vm: VM) -> None:
+    invalid_instruction = object.__new__(Instruction)
+    object.__setattr__(invalid_instruction, "opcode", "BOGUS")
+    object.__setattr__(invalid_instruction, "dst", None)
+    object.__setattr__(invalid_instruction, "src1", None)
+    object.__setattr__(invalid_instruction, "src2", None)
+    object.__setattr__(invalid_instruction, "imm", None)
+    object.__setattr__(invalid_instruction, "label", None)
+    object.__setattr__(invalid_instruction, "type_tag", None)
+
     with pytest.raises(Trap, match="INVALID_OP"):
-        vm.execute([Instruction("BOGUS")])
+        vm.execute([invalid_instruction])
 
 
 def test_divide_by_zero_trap(vm: VM) -> None:
@@ -314,6 +350,23 @@ def test_i32_wraparound(vm: VM) -> None:
     assert state.registers[2] == -(2**31)
 
 
+def test_negative_division_truncates_toward_zero(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=-7),
+        Instruction("CONST", dst=1, imm=2),
+        Instruction("DIV", dst=2, src1=0, src2=1),
+        Instruction("CONST", dst=3, imm=7),
+        Instruction("CONST", dst=4, imm=-2),
+        Instruction("DIV", dst=5, src1=3, src2=4),
+        Instruction("HALT"),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.registers[2] == -3
+    assert state.registers[5] == -3
+
+
 def test_trace_capture(vm: VM) -> None:
     program = [
         Instruction("CONST", dst=0, imm=2),
@@ -327,6 +380,7 @@ def test_trace_capture(vm: VM) -> None:
     assert len(state.trace) == 4
     assert state.trace[0].instruction.opcode == "CONST"
     assert state.trace[-1].instruction.opcode == "HALT"
+    assert state.trace[-1].post_state["pc"] == 3
     assert state.trace[2].post_state["registers"][2] == 5
 
 
@@ -343,3 +397,148 @@ def test_execution_is_deterministic(vm: VM) -> None:
 
     assert first.snapshot() == second.snapshot()
     assert [asdict(entry) for entry in first.trace] == [asdict(entry) for entry in second.trace]
+
+
+def test_instruction_rejects_unknown_opcode() -> None:
+    with pytest.raises(ValueError, match="unknown opcode"):
+        Instruction("BOGUS")
+
+
+def test_trap_args_are_initialized() -> None:
+    trap = Trap("TYPE", pc=7, instruction=Instruction("HALT"))
+
+    assert trap.args == ("TYPE",)
+    assert str(trap) == "TYPE at pc=7"
+
+
+def test_type_trap_includes_program_counter(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=1),
+        Instruction("MOV", dst=1, src1=0, type_tag="bool"),
+    ]
+
+    with pytest.raises(Trap) as exc_info:
+        vm.execute(program)
+
+    assert exc_info.value.kind == "TYPE"
+    assert exc_info.value.pc == 1
+
+
+def test_arithmetic_expression_integration(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=2),
+        Instruction("CONST", dst=1, imm=3),
+        Instruction("ADD", dst=2, src1=0, src2=1),
+        Instruction("CONST", dst=3, imm=4),
+        Instruction("MUL", dst=4, src1=2, src2=3),
+        Instruction("CONST", dst=5, imm=5),
+        Instruction("SUB", dst=6, src1=4, src2=5),
+        Instruction("HALT"),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.registers[6] == 15
+
+
+def test_factorial_integration(vm: VM) -> None:
+    program = assemble(
+        [
+            "CONST dst=0 imm=5",
+            "CONST dst=1 imm=1",
+            "CONST dst=2 imm=1",
+            "CONST dst=3 imm=1",
+            "loop:",
+            "CMP_GT dst=4 src1=2 src2=0",
+            "JGT label=done",
+            "MUL dst=1 src1=1 src2=2",
+            "ADD dst=2 src1=2 src2=3",
+            "JMP label=loop",
+            "done:",
+            "HALT",
+        ]
+    )
+
+    state = vm.execute(program)
+
+    assert state.registers[1] == 120
+
+
+def test_fibonacci_integration(vm: VM) -> None:
+    program = assemble(
+        [
+            "CONST dst=0 imm=7",
+            "CONST dst=1 imm=0",
+            "CONST dst=2 imm=1",
+            "CONST dst=3 imm=1",
+            "CONST dst=4 imm=1",
+            "loop:",
+            "CMP_LT dst=5 src1=3 src2=0",
+            "JLT label=body",
+            "JMP label=done",
+            "body:",
+            "ADD dst=6 src1=1 src2=2",
+            "MOV dst=1 src1=2",
+            "MOV dst=2 src1=6",
+            "ADD dst=3 src1=3 src2=4",
+            "JMP label=loop",
+            "done:",
+            "HALT",
+        ]
+    )
+
+    state = vm.execute(program)
+
+    assert state.registers[2] == 13
+
+
+def test_loop_based_accumulation_integration(vm: VM) -> None:
+    program = assemble(
+        [
+            "CONST dst=0 imm=1",
+            "CONST dst=1 imm=5",
+            "CONST dst=2 imm=0",
+            "CONST dst=3 imm=1",
+            "loop:",
+            "CMP_GT dst=4 src1=0 src2=1",
+            "JGT label=done",
+            "ADD dst=2 src1=2 src2=0",
+            "ADD dst=0 src1=0 src2=3",
+            "JMP label=loop",
+            "done:",
+            "HALT",
+        ]
+    )
+
+    state = vm.execute(program)
+
+    assert state.registers[2] == 15
+
+
+def test_small_array_reduction_via_memory_integration(vm: VM) -> None:
+    program = assemble(
+        [
+            "CONST dst=0 imm=100",
+            "CONST dst=1 imm=0",
+            "CONST dst=2 imm=3",
+            "CONST dst=3 imm=0",
+            "CONST dst=4 imm=1",
+            "loop:",
+            "CMP_LT dst=5 src1=1 src2=2",
+            "JLT label=body",
+            "JMP label=done",
+            "body:",
+            "ADD dst=6 src1=0 src2=1",
+            "LOAD dst=7 src1=6",
+            "ADD dst=3 src1=3 src2=7",
+            "ADD dst=1 src1=1 src2=4",
+            "JMP label=loop",
+            "done:",
+            "HALT",
+        ]
+    )
+    state = VMState(memory={100: 4, 101: 5, 102: 6})
+
+    result = vm.execute(program, state=state)
+
+    assert result.registers[3] == 15

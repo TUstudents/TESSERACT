@@ -58,3 +58,5 @@ class Instruction:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "opcode", self.opcode.upper())
+        if self.opcode not in VALID_OPCODES:
+            raise ValueError(f"unknown opcode {self.opcode!r}")
