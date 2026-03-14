@@ -25,9 +25,14 @@ class VM:
             if ins.opcode == "HALT":
                 return s
             elif ins.opcode == "CONST":
+                assert ins.dst is not None
+                assert ins.imm is not None
                 s.registers[ins.dst] = ins.imm
                 s.pc += 1
             elif ins.opcode == "ADD":
+                assert ins.dst is not None
+                assert ins.src1 is not None
+                assert ins.src2 is not None
                 s.registers[ins.dst] = s.registers.get(ins.src1, 0) + s.registers.get(ins.src2, 0)
                 s.pc += 1
             else:

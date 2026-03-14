@@ -40,6 +40,14 @@ gpu = [
     "torch==2.9.1",
 ]
 
+[dependency-groups]
+dev = [
+    "mypy>=1.18,<2",
+    "pytest>=8.4,<9",
+    "pytest-cov>=7.0,<8",
+    "ruff>=0.13,<0.14",
+]
+
 [tool.uv.build-backend]
 source-dir = "src"
 
@@ -50,3 +58,28 @@ conflicts = [
         { extra = "gpu" },
     ],
 ]
+
+[tool.pytest.ini_options]
+minversion = "7.4"
+addopts = "-ra"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests"]
+mypy_path = "src"
+warn_unused_configs = true
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
+extraPaths = ["src"]

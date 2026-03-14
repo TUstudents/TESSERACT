@@ -16,6 +16,28 @@ A compiler–executor language model architecture that separates continuous sema
 - `src/tesseract/critic/` — trace critic and repair loop
 - `tests/` — unit and integration tests
 
+## Development
+
+### Install
+
+```bash
+uv sync --group dev
+```
+
+### Run tests
+
+```bash
+pytest -q
+uv run pytest -q
+```
+
+### Lint and type-check
+
+```bash
+uv run ruff check .
+uv run mypy
+```
+
 ## Status
 
-Early scaffold repository with a detailed implementation plan. Current code includes a minimal VM prototype and initial tests; the next milestone is Phase 0 bootstrap and test harness hardening, followed by the exact VM/IR core.
+Early scaffold repository with a detailed implementation plan. Phase 0 bootstrap is now focused on packaging, development tooling, CI, and test harness hardening before work begins on the exact VM/IR core.
