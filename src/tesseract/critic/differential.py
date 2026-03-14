@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from .interface import Critic
+from .interface import Critic, CriticInput
 from .invariants import Invariant, evaluate_invariants
 from .repair import build_repair_prompt
 from .schema import CriticReport, FailureType, coerce_trace_entries, summarize_trace
@@ -27,7 +27,7 @@ class ProgramExecution:
 
 
 class DifferentialCritic(Critic):
-    def analyze(self, trace: object, expected: object | None = None) -> dict:
+    def analyze(self, trace: CriticInput, expected: CriticInput | None = None) -> dict:
         if expected is None:
             raise ValueError("expected trace or state is required for differential analysis")
         report = self.compare(trace, expected)
@@ -35,8 +35,8 @@ class DifferentialCritic(Critic):
 
     def compare(
         self,
-        candidate: VMState | Sequence | object,
-        expected: VMState | Sequence | object,
+        candidate: CriticInput,
+        expected: CriticInput,
         *,
         invariants: Sequence[Invariant] = (),
         task_prompt: str | None = None,
@@ -104,6 +104,7 @@ class DifferentialCritic(Critic):
             halted=state.halted,
             halt_reason=state.halt_reason,
             step_count=state.step_count,
+            trace=list(state.trace),
         )
         try:
             final_state = vm.execute(program, state=exec_state, trace=True)
@@ -111,10 +112,10 @@ class DifferentialCritic(Critic):
         except Trap as trap:
             return ProgramExecution(state=exec_state, trap=trap)
 
-    def _coerce_state(self, trace_or_state: object) -> VMState:
+    def _coerce_state(self, trace_or_state: CriticInput) -> VMState:
         if isinstance(trace_or_state, VMState):
             return trace_or_state
-        entries = coerce_trace_entries(trace_or_state)  # type: ignore[arg-type]
+        entries = coerce_trace_entries(trace_or_state)
         state = VMState(trace=list(entries))
         if entries:
             last = entries[-1]
@@ -154,14 +155,17 @@ class DifferentialCritic(Critic):
         if first_failing_step is None:
             if self._states_equivalent(candidate, expected):
                 return "SUCCESS"
+            candidate_trap = candidate.trace[-1].trap if candidate.trace and candidate.trace[-1].trap is not None else None
+            if candidate_trap is not None:
+                return TRAP_TO_FAILURE_TYPE.get(candidate_trap, "UNKNOWN_FAILURE")
+            if candidate.halt_reason in TRAP_TO_FAILURE_TYPE:
+                return TRAP_TO_FAILURE_TYPE[candidate.halt_reason]
             differing_addresses = self._memory_differences(candidate.memory, expected.memory)
             if differing_addresses:
                 return "WRONG_ADDRESS"
             differing_registers = self._register_differences(candidate.registers, expected.registers)
             if differing_registers:
                 return "WRONG_REGISTER"
-            if candidate.halt_reason in TRAP_TO_FAILURE_TYPE:
-                return TRAP_TO_FAILURE_TYPE[candidate.halt_reason]
             return "WRONG_VALUE"
 
         candidate_trap = candidate.trace[-1].trap if candidate.trace and candidate.trace[-1].trap is not None else None

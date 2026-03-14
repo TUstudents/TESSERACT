@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -266,4 +266,16 @@ def test_differential_critic_rejects_invalid_trace_payloads() -> None:
     gold_state = VMState(halted=True, halt_reason="HALT")
 
     with pytest.raises(TypeError, match="TraceEntry"):
-        critic.compare(["not-a-trace-entry"], gold_state)
+        critic.compare(cast(Any, ["not-a-trace-entry"]), gold_state)
+
+
+def test_differential_critic_prioritizes_trap_halt_reason_for_trace_less_states() -> None:
+    critic = DifferentialCritic()
+    candidate_state = VMState(registers={0: 1}, halted=True, halt_reason="TIMEOUT")
+    gold_state = VMState(registers={0: 0}, halted=True, halt_reason="HALT")
+
+    report = critic.compare(candidate_state, gold_state)
+
+    assert report.status == "failure"
+    assert report.first_failing_step is None
+    assert report.failure_type == "TIMEOUT"
