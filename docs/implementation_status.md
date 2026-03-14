@@ -23,6 +23,8 @@ The repository has completed the first five implemented stages of the roadmap:
 
 At this point, TESSERACT is no longer only a scaffold. It now contains a tested Python reference VM, a typed instruction representation, static program validation, an assembler/disassembler, JSON serialization for key VM artifacts, deterministic replay support, a synthetic autoregressive compiler baseline, and a differential critic scaffold.
 
+The current compiler baseline should be understood as a count-based autoregressive placeholder rather than a neural decoder. It is useful for corpus, tokenization, validation, and evaluation plumbing, but not yet for meaningful generalization.
+
 The remaining major architecture pieces are still intentionally unimplemented:
 
 - semantic backbone implementation
@@ -323,7 +325,7 @@ Implemented baseline pieces:
 
 - synthetic dataset generators
 - gold IR corpora in task objects
-- autoregressive token-sequence compiler baseline
+- count-based autoregressive token-sequence compiler baseline
 - training-step scaffold for compiler supervision
 - compiler evaluation metrics
 

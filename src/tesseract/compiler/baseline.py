@@ -117,7 +117,7 @@ class ProgramTokenizer:
         token_ids: list[int] = []
         for token in self.program_to_tokens(program):
             if token not in self.vocabulary.stoi:
-                raise ValueError(f"unknown program token {token!r}")
+                raise ValidationError(f"unknown program token {token!r}")
             token_ids.append(self.vocabulary.stoi[token])
         return token_ids
 
@@ -316,5 +316,3 @@ class AutoregressiveCompiler(Compiler):
 
 TemplateCompilerModel = AutoregressiveCompilerModel
 TemplateCompiler = AutoregressiveCompiler
-ValueVocabulary = ProgramVocabulary
-OperationVocabulary = ProgramVocabulary

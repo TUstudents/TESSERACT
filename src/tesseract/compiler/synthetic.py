@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from itertools import product
 from typing import Iterable, Sequence
 
@@ -15,10 +15,6 @@ VM_OPCODE_BY_TASK = {
 SUPPORTED_OPERATIONS = frozenset(VM_OPCODE_BY_TASK)
 SUPPORTED_TASK_TYPES = frozenset({"arithmetic", "max", "sum_to_n"})
 RESULT_REGISTER = 2
-
-
-def _strip_instruction_labels(program: tuple[Instruction, ...]) -> tuple[Instruction, ...]:
-    return tuple(replace(instruction, label=None) for instruction in program)
 
 
 def _allocate_temp_registers(*, excluded: set[int], count: int, register_count: int = 32) -> tuple[int, ...]:
@@ -81,22 +77,20 @@ def build_gold_program(
 
 
 def build_max_program(lhs: int, rhs: int, *, result_register: int = RESULT_REGISTER) -> tuple[Instruction, ...]:
-    program = _strip_instruction_labels(
-        tuple(
-            assemble(
-                [
-                    f"CONST dst=0 imm={lhs}",
-                    f"CONST dst=1 imm={rhs}",
-                    "CMP_GT dst=3 src1=0 src2=1",
-                    "JGT label=lhs_wins",
-                    f"MOV dst={result_register} src1=1",
-                    "JMP label=done",
-                    "lhs_wins:",
-                    f"MOV dst={result_register} src1=0",
-                    "done:",
-                    "HALT",
-                ]
-            )
+    program = tuple(
+        assemble(
+            [
+                f"CONST dst=0 imm={lhs}",
+                f"CONST dst=1 imm={rhs}",
+                "CMP_GT dst=3 src1=0 src2=1",
+                "JGT label=lhs_wins",
+                f"MOV dst={result_register} src1=1",
+                "JMP label=done",
+                "lhs_wins:",
+                f"MOV dst={result_register} src1=0",
+                "done:",
+                "HALT",
+            ]
         )
     )
     validate_program(program)
@@ -110,24 +104,22 @@ def build_sum_to_n_program(n: int, *, result_register: int = RESULT_REGISTER) ->
         excluded={result_register},
         count=4,
     )
-    program = _strip_instruction_labels(
-        tuple(
-            assemble(
-                [
-                    f"CONST dst={limit_register} imm={n}",
-                    f"CONST dst={result_register} imm=0",
-                    f"CONST dst={counter_register} imm=1",
-                    f"CONST dst={one_register} imm=1",
-                    "loop:",
-                    f"CMP_GT dst={compare_register} src1={counter_register} src2={limit_register}",
-                    "JGT label=done",
-                    f"ADD dst={result_register} src1={result_register} src2={counter_register}",
-                    f"ADD dst={counter_register} src1={counter_register} src2={one_register}",
-                    "JMP label=loop",
-                    "done:",
-                    "HALT",
-                ]
-            )
+    program = tuple(
+        assemble(
+            [
+                f"CONST dst={limit_register} imm={n}",
+                f"CONST dst={result_register} imm=0",
+                f"CONST dst={counter_register} imm=1",
+                f"CONST dst={one_register} imm=1",
+                "loop:",
+                f"CMP_GT dst={compare_register} src1={counter_register} src2={limit_register}",
+                "JGT label=done",
+                f"ADD dst={result_register} src1={result_register} src2={counter_register}",
+                f"ADD dst={counter_register} src1={counter_register} src2={one_register}",
+                "JMP label=loop",
+                "done:",
+                "HALT",
+            ]
         )
     )
     validate_program(program)

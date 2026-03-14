@@ -18,6 +18,7 @@ from tesseract.compiler import (
     train_step,
 )
 from tesseract.compiler.synthetic import (
+    build_max_program,
     build_sum_to_n_program,
     evaluate_operation,
     make_sum_to_n_task,
@@ -217,8 +218,16 @@ def test_program_tokenizer_rejects_encoding_unknown_tokens() -> None:
     tokenizer = ProgramTokenizer(build_vocabularies(tasks).program_vocab)
     unseen_program = build_sum_to_n_program(3)
 
-    with pytest.raises(ValueError, match="unknown program token"):
+    with pytest.raises(ValidationError, match="unknown program token"):
         tokenizer.encode_program(unseen_program)
+
+
+def test_control_flow_gold_programs_preserve_symbolic_labels() -> None:
+    max_program = build_max_program(3, 2)
+    sum_program = build_sum_to_n_program(3)
+
+    assert any(instruction.label is not None for instruction in max_program if instruction.opcode in {"JGT", "JMP"})
+    assert any(instruction.label is not None for instruction in sum_program if instruction.opcode in {"JGT", "JMP"})
 
 
 def test_evaluation_metrics_are_bounded() -> None:
@@ -265,6 +274,15 @@ def test_execute_task_uses_task_result_register() -> None:
 
     assert result.output == 5
     assert result.result_register == 5
+
+
+def test_max_program_tie_returns_shared_value() -> None:
+    program = build_max_program(3, 3)
+    task = SyntheticTask(prompt="max 3 3", expected_output=3, gold_program=program, task_type="max", lhs=3, rhs=3)
+
+    result = execute_task(task)
+
+    assert result.output == 3
 
 
 @pytest.mark.parametrize("result_register", [0, 1, 3, 4, 5])
@@ -325,6 +343,27 @@ def test_compiler_handles_unseen_prompt_tokens_without_crashing() -> None:
     validate_program(program)
 
 
+def test_compiler_returns_empty_program_on_invalid_decoded_token_sequence() -> None:
+    tasks = generate_synthetic_tasks(task_types=("arithmetic",), operations=("add",), values=(0, 1))
+    artifacts = build_vocabularies(tasks)
+    batch = build_training_batch(
+        tasks,
+        prompt_vocab=artifacts.prompt_vocab,
+        program_tokenizer=artifacts.program_tokenizer,
+    )
+    train_step(artifacts.compiler.model, batch)
+
+    def invalid_decode(self: AutoregressiveCompiler, prompt: str, *, max_steps: int = 256) -> list[int]:
+        del prompt, max_steps
+        vocabulary = self.program_tokenizer.vocabulary
+        assert vocabulary is not None
+        return [vocabulary.bos_id, len(vocabulary.itos), vocabulary.eos_id]
+
+    cast(Any, artifacts.compiler.model).decode = MethodType(invalid_decode, artifacts.compiler.model)
+
+    assert tuple(artifacts.compiler.compile("arith add 0 1")) == ()
+
+
 def test_generate_synthetic_tasks_keeps_truncating_division_examples() -> None:
     tasks = generate_synthetic_tasks(task_types=("arithmetic",), operations=("div",), values=(2, 3))
     matching = [task for task in tasks if task.operation == "div" and task.lhs == 2 and task.rhs == 3]
@@ -350,3 +389,12 @@ def test_sum_to_n_rejects_negative_inputs() -> None:
         make_sum_to_n_task(-1)
     with pytest.raises(ValueError, match="non-negative"):
         generate_synthetic_tasks(task_types=("sum_to_n",), values=(-1, 0))
+
+
+def test_sum_to_n_zero_is_a_documented_degenerate_case() -> None:
+    task = make_sum_to_n_task(0)
+
+    result = execute_task(task)
+
+    assert result.output == 0
+    assert len(task.gold_program) > 4

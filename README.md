@@ -47,4 +47,4 @@ Current reference-VM policy:
 
 ## Status
 
-The repository now includes a tested VM/IR core, validation/assembly/serialization tooling, a synthetic compiler baseline, and a trace critic scaffold. The next major compiler milestone is improving the autoregressive compiler path and connecting it to later repair and NL compilation phases.
+The repository now includes a tested VM/IR core, validation/assembly/serialization tooling, a synthetic compiler baseline, and a trace critic scaffold. The current compiler baseline is a count-based autoregressive placeholder rather than a neural decoder, so the next major compiler milestone is improving that autoregressive path and connecting it to later repair and NL compilation phases.
