@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 from tesseract.backbone.datasets import NaturalLanguageTask, generate_nl_tasks
 from tesseract.compiler.nl import BackboneConditionedCompiler
-from tesseract.vm import Trap, VM, ValidationError, validate_program
+from tesseract.compiler.synthetic import RESULT_REGISTER
+from tesseract.vm import Trap, VM, ValidationError, program_from_dict, program_to_dict, validate_program
 
 
 @dataclass(frozen=True)
@@ -12,6 +14,23 @@ class BenchmarkSuite:
     name: str
     seed: int
     tasks: tuple[NaturalLanguageTask, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "seed": self.seed,
+            "tasks": [
+                {
+                    "prompt": task.prompt,
+                    "canonical_prompt": task.canonical_prompt,
+                    "expected_output": task.expected_output,
+                    "gold_program": program_to_dict(task.gold_program),
+                    "result_register": task.result_register,
+                    "task_type": task.task_type,
+                }
+                for task in self.tasks
+            ],
+        }
 
 
 @dataclass(frozen=True)
@@ -72,6 +91,25 @@ class BenchmarkReport:
         payload["exact_program_match"] = self.exact_program_match
         payload["average_program_length"] = self.average_program_length
         return payload
+
+
+def benchmark_suite_from_dict(data: dict[str, Any]) -> BenchmarkSuite:
+    tasks = tuple(
+        NaturalLanguageTask(
+            prompt=task_data["prompt"],
+            canonical_prompt=task_data["canonical_prompt"],
+            expected_output=task_data["expected_output"],
+            gold_program=tuple(program_from_dict(task_data["gold_program"])),
+            result_register=task_data.get("result_register", RESULT_REGISTER),
+            task_type=task_data.get("task_type", "arithmetic"),
+        )
+        for task_data in data.get("tasks", [])
+    )
+    return BenchmarkSuite(
+        name=data["name"],
+        seed=data["seed"],
+        tasks=tasks,
+    )
 
 
 def build_nl_benchmark_suite(

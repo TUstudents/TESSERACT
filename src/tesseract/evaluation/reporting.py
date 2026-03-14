@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import json
 
-from .benchmark import BenchmarkReport
+from .benchmark import BenchmarkReport, BenchmarkSuite, benchmark_suite_from_dict
+
+
+def benchmark_suite_to_json(suite: BenchmarkSuite) -> str:
+    return json.dumps(suite.to_dict(), sort_keys=True)
+
+
+def benchmark_suite_from_json(payload: str) -> BenchmarkSuite:
+    return benchmark_suite_from_dict(json.loads(payload))
 
 
 def benchmark_report_to_json(report: BenchmarkReport) -> str:

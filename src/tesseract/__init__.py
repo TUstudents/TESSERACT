@@ -1,12 +1,24 @@
 """TESSERACT compiler–executor language model scaffold."""
 
+from importlib import import_module
+from types import ModuleType
+
 from . import backbone, critic, vm
 
-try:
-    from . import compiler, evaluation
-except (ModuleNotFoundError, ImportError):  # pragma: no cover - optional runtime dependency path
-    compiler = None  # type: ignore[assignment]
-    evaluation = None  # type: ignore[assignment]
+_OPTIONAL_RUNTIME_DEPENDENCIES = {"numpy", "torch"}
+
+
+def _import_optional_submodule(name: str) -> ModuleType | None:
+    try:
+        return import_module(name, package=__name__)
+    except ModuleNotFoundError as exc:  # pragma: no cover - exercised via package import tests
+        if exc.name in _OPTIONAL_RUNTIME_DEPENDENCIES:
+            return None
+        raise
+
+
+compiler = _import_optional_submodule(".compiler")
+evaluation = _import_optional_submodule(".evaluation")
 
 __all__ = [
     "backbone",

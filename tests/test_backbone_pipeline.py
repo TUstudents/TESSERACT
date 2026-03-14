@@ -9,11 +9,16 @@ from tesseract.backbone import RuleBasedBackbone, generate_nl_tasks
 from tesseract.compiler import build_training_batch, build_vocabularies, train_step
 from tesseract.compiler.nl import BackboneConditionedCompiler
 from tesseract.critic import DifferentialCritic
-from tesseract.vm import Instruction, VM, validate_program
+from tesseract.vm import Instruction, VM, ValidationError, validate_program
 
 
 def _build_trained_nl_compiler() -> BackboneConditionedCompiler:
-    nl_tasks = generate_nl_tasks(task_types=("arithmetic", "max", "sum_to_n"), operations=("add", "sub"), values=(1, 2, 3))
+    nl_tasks = generate_nl_tasks(
+        task_types=("arithmetic", "max", "sum_to_n"),
+        operations=("add", "sub"),
+        values=(1, 2, 3),
+        seed=0,
+    )
     synthetic_tasks = [task.to_synthetic_task() for task in nl_tasks]
     artifacts = build_vocabularies(synthetic_tasks)
     batch = build_training_batch(
@@ -26,7 +31,7 @@ def _build_trained_nl_compiler() -> BackboneConditionedCompiler:
 
 
 def test_rule_based_backbone_encodes_supported_prompts() -> None:
-    tasks = generate_nl_tasks(task_types=("arithmetic", "max", "sum_to_n"), operations=("add",), values=(1, 2))
+    tasks = generate_nl_tasks(task_types=("arithmetic", "max", "sum_to_n"), operations=("add",), values=(1, 2), seed=0)
     backbone = RuleBasedBackbone()
 
     outputs = [backbone.encode(task.prompt) for task in tasks]
@@ -36,10 +41,47 @@ def test_rule_based_backbone_encodes_supported_prompts() -> None:
     assert {output.canonical_prompt for output in outputs} == {task.canonical_prompt for task in tasks}
 
 
+@pytest.mark.parametrize(
+    ("prompt", "task_type", "canonical_prompt"),
+    [
+        ("What is 2 plus 3?", "arithmetic", "arith add 2 3"),
+        ("Add 2 and 3", "arithmetic", "arith add 2 3"),
+        ("What is 5 minus 2?", "arithmetic", "arith sub 5 2"),
+        ("Subtract 2 from 5", "arithmetic", "arith sub 5 2"),
+        ("What is 4 times 3?", "arithmetic", "arith mul 4 3"),
+        ("Multiply 4 and 3", "arithmetic", "arith mul 4 3"),
+        ("What is 8 divided by 2?", "arithmetic", "arith div 8 2"),
+        ("Divide 8 by 2", "arithmetic", "arith div 8 2"),
+        ("Max of 2 and 7", "max", "max 2 7"),
+        ("Which number is larger: 2 or 7?", "max", "max 2 7"),
+        ("Which is bigger, 2 or 7?", "max", "max 2 7"),
+        ("Compare 2 and 7 and return the larger", "max", "max 2 7"),
+        ("Sum integers from 1 to 4", "sum_to_n", "sum_to_n 4"),
+        ("Sum numbers from 1 to 4", "sum_to_n", "sum_to_n 4"),
+        ("Sum all integers up to 4", "sum_to_n", "sum_to_n 4"),
+        ("Compute the triangular number of 4", "sum_to_n", "sum_to_n 4"),
+    ],
+)
+def test_rule_based_backbone_covers_all_supported_prompt_variants(
+    prompt: str,
+    task_type: str,
+    canonical_prompt: str,
+) -> None:
+    output = RuleBasedBackbone().encode(prompt)
+
+    assert output.task_type == task_type
+    assert output.canonical_prompt == canonical_prompt
+
+
 def test_backbone_conditioned_compiler_runs_end_to_end_on_nl_tasks() -> None:
     compiler = _build_trained_nl_compiler()
     vm = VM()
-    tasks = generate_nl_tasks(task_types=("arithmetic", "max", "sum_to_n"), operations=("add", "sub"), values=(1, 2))
+    tasks = generate_nl_tasks(
+        task_types=("arithmetic", "max", "sum_to_n"),
+        operations=("add", "sub"),
+        values=(1, 2),
+        seed=0,
+    )
 
     for task in tasks:
         result = compiler.execute(task.prompt, vm=vm)
@@ -50,7 +92,7 @@ def test_backbone_conditioned_compiler_runs_end_to_end_on_nl_tasks() -> None:
 
 def test_nl_pipeline_depends_on_emitted_ir_execution() -> None:
     compiler = _build_trained_nl_compiler()
-    task = generate_nl_tasks(task_types=("arithmetic",), operations=("add",), values=(2,))[0]
+    task = generate_nl_tasks(task_types=("arithmetic",), operations=("add",), values=(2,), seed=0)[0]
 
     good_result = compiler.execute(task.prompt)
     assert good_result.output == task.expected_output
@@ -72,11 +114,29 @@ def test_backbone_conditioned_compiler_rejects_unsupported_prompt() -> None:
         compiler.compile("Explain recursion")
 
 
+def test_generate_nl_tasks_rejects_unknown_task_types_and_operations() -> None:
+    with pytest.raises(ValueError, match="unsupported task type"):
+        generate_nl_tasks(task_types=("arithmetic", "unknown"))
+    with pytest.raises(ValueError, match="unsupported operation"):
+        generate_nl_tasks(task_types=("arithmetic",), operations=("add", "pow"))
+
+
+def test_backbone_conditioned_compiler_threads_repair_hint_through_metadata() -> None:
+    compiler = _build_trained_nl_compiler()
+    critic = DifferentialCritic()
+    baseline_state = VM().execute([Instruction("HALT")], trace=True)
+    report = critic.compare(baseline_state, baseline_state, task_prompt="What is 1 plus 2?")
+
+    compile_result = compiler.compile_with_backbone_output("What is 1 plus 2?", repair_context=report)
+
+    assert compile_result.backbone_output.metadata["repair_hint"] == report.repair_prompt
+
+
 def test_nl_critic_pipeline_can_compare_candidate_to_gold_program() -> None:
     compiler = _build_trained_nl_compiler()
     critic = DifferentialCritic()
     vm = VM()
-    task = generate_nl_tasks(task_types=("max",), values=(2, 3))[0]
+    task = generate_nl_tasks(task_types=("max",), values=(2, 3), seed=0)[0]
 
     candidate = tuple(compiler.compile(task.prompt))
     report = critic.compare_programs(vm, candidate, task.gold_program, task_prompt=task.prompt)
@@ -87,7 +147,7 @@ def test_nl_critic_pipeline_can_compare_candidate_to_gold_program() -> None:
 
 def test_invalid_ir_ablation_breaks_nl_execution_accuracy() -> None:
     compiler = _build_trained_nl_compiler()
-    tasks = generate_nl_tasks(task_types=("arithmetic",), operations=("add",), values=(1, 2))
+    tasks = generate_nl_tasks(task_types=("arithmetic",), operations=("add",), values=(1, 2), seed=0)
 
     def invalid_compile(self: Any, prompt: str):
         del prompt
@@ -98,3 +158,5 @@ def test_invalid_ir_ablation_breaks_nl_execution_accuracy() -> None:
     for task in tasks:
         compile_result = compiler.compile_with_backbone_output(task.prompt)
         assert compile_result.program == ()
+        with pytest.raises(ValidationError, match="program must not be empty"):
+            compiler.execute(task.prompt)

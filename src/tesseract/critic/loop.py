@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Sequence
 
 from tesseract.backbone.datasets import NaturalLanguageTask
-from tesseract.compiler.nl import BackboneConditionedCompiler, NaturalLanguageCompileResult
+from tesseract.compiler.nl import NaturalLanguageCompileResult, RepairCapableCompiler
 from tesseract.vm import Instruction, VM, ValidationError, validate_program
 
 from .differential import DifferentialCritic
@@ -26,6 +26,7 @@ class RepairAttempt:
     round_index: int
     compile_result: NaturalLanguageCompileResult
     critic_report: CriticReport
+    repair_context: RepairContext | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,22 @@ class RepairLoopMetrics:
     non_convergence_rate: float
     oscillation_rate: float
     average_rounds: float
+    average_extra_steps: float
+
+
+def build_repair_context(
+    *,
+    task_prompt: str,
+    candidate_program: tuple[Instruction, ...],
+    critic_report: CriticReport,
+    round_index: int,
+) -> RepairContext:
+    return RepairContext(
+        task_prompt=task_prompt,
+        candidate_program=candidate_program,
+        critic_report=critic_report,
+        round_index=round_index,
+    )
 
 
 @dataclass
@@ -70,7 +87,7 @@ class RepairLoopController:
     def run(
         self,
         task: NaturalLanguageTask,
-        compiler: BackboneConditionedCompiler,
+        compiler: RepairCapableCompiler,
     ) -> RepairLoopResult:
         attempts: list[RepairAttempt] = []
         seen_programs: set[tuple[Instruction, ...]] = set()
@@ -79,7 +96,8 @@ class RepairLoopController:
             if round_index == 0:
                 compile_result = compiler.compile_with_backbone_output(task.prompt)
             else:
-                previous_report = attempts[-1].critic_report
+                previous_context = attempts[-1].repair_context
+                previous_report = attempts[-1].critic_report if previous_context is None else previous_context.critic_report
                 compile_result = compiler.repair_compile(task.prompt, previous_report)
 
             program = tuple(compile_result.program)
@@ -89,11 +107,18 @@ class RepairLoopController:
                 task.gold_program,
                 task_prompt=task.prompt,
             )
+            repair_context = build_repair_context(
+                task_prompt=task.prompt,
+                candidate_program=program,
+                critic_report=report,
+                round_index=round_index,
+            )
             attempts.append(
                 RepairAttempt(
                     round_index=round_index,
                     compile_result=compile_result,
                     critic_report=report,
+                    repair_context=repair_context,
                 )
             )
 
@@ -133,6 +158,7 @@ def evaluate_repair_loop(results: Sequence[RepairLoopResult]) -> RepairLoopMetri
             non_convergence_rate=0.0,
             oscillation_rate=0.0,
             average_rounds=0.0,
+            average_extra_steps=0.0,
         )
 
     total = len(results)
@@ -142,6 +168,7 @@ def evaluate_repair_loop(results: Sequence[RepairLoopResult]) -> RepairLoopMetri
     oscillations = sum(1 for result in results if result.termination_reason == "oscillation")
     non_convergence = sum(1 for result in results if not result.success)
     average_rounds = sum(result.rounds_used for result in results) / total
+    average_extra_steps = sum(max(0, result.rounds_used - 1) for result in results) / total
     return RepairLoopMetrics(
         success_after_1_round=success_after_1 / total,
         success_after_2_rounds=success_after_2 / total,
@@ -149,4 +176,5 @@ def evaluate_repair_loop(results: Sequence[RepairLoopResult]) -> RepairLoopMetri
         non_convergence_rate=non_convergence / total,
         oscillation_rate=oscillations / total,
         average_rounds=average_rounds,
+        average_extra_steps=average_extra_steps,
     )

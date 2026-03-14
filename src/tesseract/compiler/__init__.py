@@ -1,4 +1,7 @@
-"""Latent compiler interfaces and synthetic baselines."""
+"""Latent compiler interfaces, baselines, and NL-conditioned compiler paths."""
+
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
 
 from .baseline import (
     AutoregressiveCompiler,
@@ -37,8 +40,15 @@ from .training import (
     train_step,
 )
 
+if TYPE_CHECKING:
+    from .nl import BackboneConditionedCompiler, NaturalLanguageCompileResult, NaturalLanguageExecutionResult, RepairCapableCompiler
+
 __all__ = [
     "Compiler",
+    "BackboneConditionedCompiler",
+    "NaturalLanguageCompileResult",
+    "NaturalLanguageExecutionResult",
+    "RepairCapableCompiler",
     "RESULT_REGISTER",
     "SUPPORTED_OPERATIONS",
     "SUPPORTED_TASK_TYPES",
@@ -69,3 +79,15 @@ __all__ = [
     "train_step",
     "evaluate_compiler",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name in {
+        "BackboneConditionedCompiler",
+        "NaturalLanguageCompileResult",
+        "NaturalLanguageExecutionResult",
+        "RepairCapableCompiler",
+    }:
+        module = import_module(".nl", package=__name__)
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -25,8 +25,8 @@ class RuleBasedBackbone(Backbone):
         *,
         repair_hint: str | None = None,
     ) -> BackboneOutput:
-        del repair_hint
         normalized = self._normalize(prompt)
+        metadata = self._base_metadata(repair_hint)
 
         arithmetic_match = self._match_arithmetic(normalized)
         if arithmetic_match is not None:
@@ -37,7 +37,7 @@ class RuleBasedBackbone(Backbone):
                 task_type="arithmetic",
                 result_register=self.result_register,
                 values=(lhs, rhs),
-                metadata={"operation": operation},
+                metadata={**metadata, "operation": operation},
             )
 
         max_match = self._match_max(normalized)
@@ -49,6 +49,7 @@ class RuleBasedBackbone(Backbone):
                 task_type="max",
                 result_register=self.result_register,
                 values=(lhs, rhs),
+                metadata=metadata,
             )
 
         sum_match = self._match_sum_to_n(normalized)
@@ -59,9 +60,15 @@ class RuleBasedBackbone(Backbone):
                 task_type="sum_to_n",
                 result_register=self.result_register,
                 values=(sum_match,),
+                metadata=metadata,
             )
 
         raise ValueError(f"unsupported natural-language prompt {prompt!r}")
+
+    def _base_metadata(self, repair_hint: str | None) -> dict[str, int | float | str | bool]:
+        if repair_hint is None:
+            return {}
+        return {"repair_hint": repair_hint}
 
     def _normalize(self, prompt: str) -> str:
         lowered = prompt.lower().strip()

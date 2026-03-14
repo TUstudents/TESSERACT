@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Protocol, Sequence
 
 from tesseract.backbone.interface import Backbone, BackboneOutput
 from tesseract.compiler.baseline import AutoregressiveCompiler
 from tesseract.critic.schema import CriticReport
-from tesseract.vm import Instruction, VM
+from tesseract.vm import Instruction, VM, validate_program
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,23 @@ class NaturalLanguageExecutionResult:
     backbone_output: BackboneOutput
     program: tuple[Instruction, ...]
     output: int
+
+
+class RepairCapableCompiler(Protocol):
+    def compile_with_backbone_output(
+        self,
+        prompt: str,
+        *,
+        repair_context: CriticReport | None = None,
+    ) -> NaturalLanguageCompileResult:
+        ...
+
+    def repair_compile(
+        self,
+        prompt: str,
+        report: CriticReport,
+    ) -> NaturalLanguageCompileResult:
+        ...
 
 
 @dataclass
@@ -56,6 +73,7 @@ class BackboneConditionedCompiler:
         repair_context: CriticReport | None = None,
     ) -> NaturalLanguageExecutionResult:
         compile_result = self.compile_with_backbone_output(prompt, repair_context=repair_context)
+        validate_program(compile_result.program)
         machine = vm if vm is not None else VM()
         state = machine.execute(compile_result.program)
         return NaturalLanguageExecutionResult(

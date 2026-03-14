@@ -6,6 +6,8 @@ from typing import Iterable, Sequence
 
 from tesseract.compiler.synthetic import (
     RESULT_REGISTER,
+    SUPPORTED_OPERATIONS,
+    SUPPORTED_TASK_TYPES,
     SyntheticTask,
     build_arithmetic_prompt,
     build_gold_program,
@@ -49,6 +51,12 @@ def generate_nl_tasks(
     tasks: list[NaturalLanguageTask] = []
     cached_values = list(values)
     requested_types = set(task_types)
+    unknown_task_types = requested_types - SUPPORTED_TASK_TYPES
+    if unknown_task_types:
+        raise ValueError(f"unsupported task type(s): {sorted(unknown_task_types)!r}")
+    unknown_operations = set(operations) - SUPPORTED_OPERATIONS
+    if unknown_operations:
+        raise ValueError(f"unsupported operation(s): {sorted(unknown_operations)!r}")
 
     if "arithmetic" in requested_types:
         for operation in operations:

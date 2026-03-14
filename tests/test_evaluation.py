@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import json
+from types import MethodType
+from typing import Any, cast
 
+import numpy as np
 import torch
 
 from tesseract.backbone import RuleBasedBackbone, generate_nl_tasks
 from tesseract.compiler import build_training_batch, build_vocabularies, train_step
 from tesseract.compiler.nl import BackboneConditionedCompiler
+from tesseract.vm import Instruction, VM
 from tesseract.evaluation import (
     benchmark_report_to_json,
     benchmark_report_to_text,
+    benchmark_suite_from_json,
+    benchmark_suite_to_json,
     build_nl_benchmark_suite,
     run_nl_benchmark,
     set_global_seed,
@@ -31,11 +37,14 @@ def _build_trained_nl_compiler() -> BackboneConditionedCompiler:
 
 def test_set_global_seed_is_reproducible() -> None:
     set_global_seed(123)
-    first = torch.rand(4)
+    first_torch = torch.rand(4)
+    first_numpy = np.random.rand(4)
     set_global_seed(123)
-    second = torch.rand(4)
+    second_torch = torch.rand(4)
+    second_numpy = np.random.rand(4)
 
-    assert torch.equal(first, second)
+    assert torch.equal(first_torch, second_torch)
+    assert np.array_equal(first_numpy, second_numpy)
 
 
 def test_nl_benchmark_suite_is_seed_reproducible() -> None:
@@ -45,6 +54,15 @@ def test_nl_benchmark_suite_is_seed_reproducible() -> None:
 
     assert first.tasks == second.tasks
     assert first.tasks != third.tasks
+
+
+def test_benchmark_suite_round_trips_through_json_freeze_payload() -> None:
+    suite = build_nl_benchmark_suite(seed=7)
+
+    payload = benchmark_suite_to_json(suite)
+    restored = benchmark_suite_from_json(payload)
+
+    assert restored == suite
 
 
 def test_run_nl_benchmark_reports_exact_execution_metrics() -> None:
@@ -58,6 +76,22 @@ def test_run_nl_benchmark_reports_exact_execution_metrics() -> None:
     assert report.execution_success_rate == 1.0
     assert report.exact_program_match == 1.0
     assert report.average_program_length > 4.0
+
+
+def test_run_nl_benchmark_records_timeout_failures_stably() -> None:
+    compiler = _build_trained_nl_compiler()
+    suite = build_nl_benchmark_suite(seed=0)
+
+    def looping_compile(self: Any, prompt: str):
+        del prompt
+        return (Instruction("JMP", imm=0), Instruction("HALT"))
+
+    cast(Any, compiler.compiler).compile = MethodType(looping_compile, compiler.compiler)
+    report = run_nl_benchmark(compiler, suite, vm=VM(step_budget=5))
+
+    assert report.compile_validity_rate == 1.0
+    assert report.execution_success_rate == 0.0
+    assert {result.trap_kind for result in report.results} == {"TIMEOUT"}
 
 
 def test_benchmark_report_serialization_helpers() -> None:
