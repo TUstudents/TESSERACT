@@ -1,20 +1,52 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.6.6,<0.7"]
+build-backend = "uv_build"
 
 [project]
-name = "tesseract-llm"
+name = "tesseract"
 version = "0.1.0"
 description = "TESSERACT compiler-executor language model scaffold"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [
   {name = "Johannes Poms"}
 ]
-dependencies = []
+dependencies = [
+  "torch==2.9.1"
+]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+# target torch to cuda 12.8 or CPU
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu128", extra = "gpu" },
+]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[project.optional-dependencies]
+cpu = [
+    "torch==2.9.1",
+]
+gpu = [
+    "torch==2.9.1",
+]
+
+[tool.uv.build-backend]
+source-dir = "src"
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "gpu" },
+    ],
+]
