@@ -4,6 +4,7 @@ import json
 from dataclasses import asdict
 from typing import Any
 
+from .analysis import ValidationError
 from .ir import Instruction
 from .machine import Trap, VM
 from .state import TraceEntry, VMState
@@ -14,7 +15,10 @@ def instruction_to_dict(instruction: Instruction) -> dict[str, Any]:
 
 
 def instruction_from_dict(data: dict[str, Any]) -> Instruction:
-    return Instruction(**data)
+    try:
+        return Instruction(**data)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
 
 
 def program_to_dict(program: list[Instruction] | tuple[Instruction, ...]) -> dict[str, Any]:

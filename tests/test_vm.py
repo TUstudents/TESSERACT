@@ -168,6 +168,39 @@ def test_jnz_opcode_takes_branch_on_non_zero(vm: VM) -> None:
     assert state.registers[1] == 42
 
 
+def test_cmp_eq_plus_jnz_implements_branch_on_equality(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=5),
+        Instruction("CONST", dst=1, imm=5),
+        Instruction("CMP_EQ", dst=2, src1=0, src2=1),
+        Instruction("JNZ", src1=2, imm=6),
+        Instruction("CONST", dst=3, imm=0),
+        Instruction("JMP", imm=7),
+        Instruction("CONST", dst=3, imm=1),
+        Instruction("HALT"),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.registers[2] is True
+    assert state.registers[3] == 1
+
+
+def test_jz_opcode_works_with_bool_registers(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=False, type_tag="bool"),
+        Instruction("JZ", src1=0, imm=4),
+        Instruction("CONST", dst=1, imm=99),
+        Instruction("JMP", imm=5),
+        Instruction("CONST", dst=1, imm=42),
+        Instruction("HALT"),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.registers[1] == 42
+
+
 def test_jlt_opcode_uses_flags(vm: VM) -> None:
     program = [
         Instruction("CONST", dst=0, imm=2),
@@ -217,6 +250,18 @@ def test_load_and_store(vm: VM) -> None:
     assert state.registers[2] == 7
 
 
+def test_load_from_unwritten_memory_returns_zero(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=10),
+        Instruction("LOAD", dst=1, src1=0, imm=5),
+        Instruction("HALT"),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.registers[1] == 0
+
+
 def test_push_and_pop(vm: VM) -> None:
     program = [
         Instruction("CONST", dst=0, imm=9),
@@ -243,6 +288,27 @@ def test_call_and_ret(vm: VM) -> None:
     state = vm.execute(program)
 
     assert state.registers[0] == 13
+    assert state.call_stack == []
+    assert state.halt_reason == "HALT"
+
+
+def test_nested_call_and_ret(vm: VM) -> None:
+    program = [
+        Instruction("CALL", imm=3),
+        Instruction("HALT"),
+        Instruction("HALT"),
+        Instruction("CALL", imm=6),
+        Instruction("ADD", dst=0, src1=0, src2=1),
+        Instruction("RET"),
+        Instruction("CONST", dst=0, imm=7),
+        Instruction("CONST", dst=1, imm=8),
+        Instruction("RET"),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.registers[0] == 15
+    assert state.registers[1] == 8
     assert state.call_stack == []
     assert state.halt_reason == "HALT"
 
@@ -365,6 +431,21 @@ def test_negative_division_truncates_toward_zero(vm: VM) -> None:
 
     assert state.registers[2] == -3
     assert state.registers[5] == -3
+
+
+def test_arithmetic_clears_eq_flag(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=5),
+        Instruction("CONST", dst=1, imm=5),
+        Instruction("CMP_EQ", dst=2, src1=0, src2=1),
+        Instruction("ADD", dst=3, src1=0, src2=1),
+        Instruction("HALT"),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.flags["eq"] is False
+    assert state.flags["zero"] is False
 
 
 def test_trace_capture(vm: VM) -> None:

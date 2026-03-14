@@ -173,6 +173,11 @@ def test_program_json_round_trip() -> None:
     assert restored == program
 
 
+def test_program_json_rejects_unknown_opcode_with_validation_error() -> None:
+    with pytest.raises(ValidationError, match="unknown opcode"):
+        program_from_json('{"instructions": [{"opcode": "BOGUS"}]}')
+
+
 def test_trace_json_round_trip() -> None:
     vm = VM()
     program = [

@@ -155,6 +155,7 @@ Current VM features:
 - arithmetic and boolean semantics
 - comparison flags
 - branching and jumps
+- `JZ`/`JNZ` branch on a register value, while `JLT`/`JGT` branch on comparison flags
 - load/store memory operations
 - push/pop stack operations
 - call/return semantics

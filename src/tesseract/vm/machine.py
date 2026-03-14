@@ -370,7 +370,7 @@ class VM:
     def _set_scalar_flags(self, state: VMState, value: VMValue) -> None:
         zero = self._is_zero_value(value)
         state.flags["zero"] = zero
-        state.flags["eq"] = zero
+        state.flags["eq"] = False
         state.flags["lt"] = False
         state.flags["gt"] = False
 
