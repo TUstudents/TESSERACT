@@ -50,11 +50,14 @@ def disassemble(program: list[Instruction] | tuple[Instruction, ...]) -> list[st
 
 
 def _target_labels(program: list[Instruction] | tuple[Instruction, ...]) -> dict[int, str]:
+    program_length = len(program)
     targets = sorted(
         {
             instruction.imm
             for instruction in program
-            if instruction.opcode in CONTROL_FLOW_OPCODES and isinstance(instruction.imm, int)
+            if instruction.opcode in CONTROL_FLOW_OPCODES
+            and isinstance(instruction.imm, int)
+            and 0 <= instruction.imm < program_length
         }
     )
     return {target: f"L{slot}" for slot, target in enumerate(targets)}
@@ -92,17 +95,21 @@ def _parse_instruction_line(line: str) -> Instruction:
     imm: int | bool | None = None
     label: str | None = None
     type_tag: str | None = None
+    seen_operands: set[str] = set()
 
     for token in parts[1:]:
         if "=" not in token:
             raise ValidationError(f"malformed operand {token!r}")
         key, raw_value = token.split("=", 1)
+        if key in seen_operands:
+            raise ValidationError(f"duplicate operand {key!r}")
+        seen_operands.add(key)
         if key == "dst":
-            dst = int(raw_value)
+            dst = _parse_int_operand(key, raw_value)
         elif key == "src1":
-            src1 = int(raw_value)
+            src1 = _parse_int_operand(key, raw_value)
         elif key == "src2":
-            src2 = int(raw_value)
+            src2 = _parse_int_operand(key, raw_value)
         elif key == "imm":
             imm = _parse_immediate(raw_value)
         elif key == "label":
@@ -115,13 +122,23 @@ def _parse_instruction_line(line: str) -> Instruction:
     return Instruction(opcode=opcode, dst=dst, src1=src1, src2=src2, imm=imm, label=label, type_tag=type_tag)
 
 
+def _parse_int_operand(name: str, raw_value: str) -> int:
+    try:
+        return int(raw_value)
+    except ValueError as exc:
+        raise ValidationError(f"invalid integer operand {name!r}: {raw_value!r}") from exc
+
+
 def _parse_immediate(raw_value: str) -> int | bool:
     lowered = raw_value.lower()
     if lowered == "true":
         return True
     if lowered == "false":
         return False
-    return int(raw_value)
+    try:
+        return int(raw_value)
+    except ValueError as exc:
+        raise ValidationError(f"invalid immediate {raw_value!r}") from exc
 
 
 def _format_value(value: int | bool) -> str:

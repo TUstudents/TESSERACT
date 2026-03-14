@@ -127,6 +127,19 @@ def test_differential_critic_detects_timeout() -> None:
     assert report.candidate_summary.halt_reason == "TIMEOUT"
 
 
+def test_differential_critic_treats_matching_traps_as_success() -> None:
+    vm = VM()
+    critic = DifferentialCritic()
+    gold = [Instruction("DIV", dst=0, src1=0, src2=1)]
+    candidate = [Instruction("DIV", dst=0, src1=0, src2=1)]
+
+    report = critic.compare_programs(vm, candidate, gold)
+
+    assert report.status == "success"
+    assert report.failure_type == "SUCCESS"
+    assert report.first_failing_step is None
+
+
 def test_differential_critic_detects_type_error() -> None:
     vm = VM()
     critic = DifferentialCritic()
@@ -189,6 +202,23 @@ def test_critic_analyze_returns_dict_with_repair_prompt() -> None:
     assert "candidate trace matches expected trace" in payload["message"]
 
 
+def test_differential_critic_uses_invariant_failure_type_for_matching_trace() -> None:
+    vm = VM()
+    critic = DifferentialCritic()
+    gold_state = vm.execute([Instruction("HALT")], trace=True)
+    candidate_state = vm.execute([Instruction("HALT")], trace=True)
+
+    report = critic.compare(
+        candidate_state,
+        gold_state,
+        invariants=cast(tuple[Invariant, ...], (FinalRegisterInvariant(register=0, expected=1),)),
+    )
+
+    assert report.status == "failure"
+    assert report.failure_type == "INVARIANT_VIOLATION"
+    assert len(report.invariant_violations) == 1
+
+
 def test_differential_critic_compares_candidate_and_gold_traces_directly() -> None:
     vm = VM()
     critic = DifferentialCritic()
@@ -216,3 +246,24 @@ def test_differential_critic_compares_candidate_and_gold_traces_directly() -> No
     assert report.first_failing_step == 2
     assert report.failure_type == "WRONG_REGISTER"
     assert report.differing_registers == (2,)
+
+
+def test_differential_critic_compares_trace_less_final_states() -> None:
+    critic = DifferentialCritic()
+    candidate_state = VMState(registers={0: 1}, halted=True, halt_reason="HALT")
+    gold_state = VMState(registers={0: 2}, halted=True, halt_reason="HALT")
+
+    report = critic.compare(candidate_state, gold_state)
+
+    assert report.status == "failure"
+    assert report.first_failing_step is None
+    assert report.failure_type == "WRONG_REGISTER"
+    assert report.differing_registers == (0,)
+
+
+def test_differential_critic_rejects_invalid_trace_payloads() -> None:
+    critic = DifferentialCritic()
+    gold_state = VMState(halted=True, halt_reason="HALT")
+
+    with pytest.raises(TypeError, match="TraceEntry"):
+        critic.compare(["not-a-trace-entry"], gold_state)

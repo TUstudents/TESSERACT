@@ -63,6 +63,14 @@ def test_disassemble_round_trip() -> None:
     assert _normalize_labels(first) == _normalize_labels(second)
 
 
+def test_disassemble_preserves_out_of_range_branch_targets_as_immediates() -> None:
+    program = [Instruction("JMP", imm=99), Instruction("HALT")]
+
+    text = disassemble(program)
+
+    assert text == ["JMP imm=99", "HALT"]
+
+
 def test_validate_program_rejects_invalid_register() -> None:
     with pytest.raises(ValidationError, match="out of range"):
         validate_program([Instruction("CONST", dst=99, imm=1), Instruction("HALT")])
@@ -98,6 +106,21 @@ def test_assemble_rejects_duplicate_label() -> None:
 def test_assemble_rejects_malformed_operand() -> None:
     with pytest.raises(ValidationError, match="malformed operand"):
         assemble(["CONST dst=0 imm"])
+
+
+def test_assemble_rejects_duplicate_operand() -> None:
+    with pytest.raises(ValidationError, match="duplicate operand"):
+        assemble(["CONST dst=0 dst=1 imm=2", "HALT"])
+
+
+def test_assemble_rejects_invalid_integer_operand() -> None:
+    with pytest.raises(ValidationError, match="invalid integer operand"):
+        assemble(["CONST dst=not_an_int imm=1", "HALT"])
+
+
+def test_assemble_rejects_invalid_immediate() -> None:
+    with pytest.raises(ValidationError, match="invalid immediate"):
+        assemble(["CONST dst=0 imm=not_an_int", "HALT"])
 
 
 def test_validate_program_type_checks_bool_add() -> None:

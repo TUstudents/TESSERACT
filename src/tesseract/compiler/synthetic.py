@@ -12,11 +12,20 @@ VM_OPCODE_BY_TASK = {
     "mul": "MUL",
     "div": "DIV",
 }
+SUPPORTED_OPERATIONS = frozenset(VM_OPCODE_BY_TASK)
+SUPPORTED_TASK_TYPES = frozenset({"arithmetic", "max", "sum_to_n"})
 RESULT_REGISTER = 2
 
 
 def _strip_instruction_labels(program: tuple[Instruction, ...]) -> tuple[Instruction, ...]:
     return tuple(replace(instruction, label=None) for instruction in program)
+
+
+def _allocate_temp_registers(*, excluded: set[int], count: int, register_count: int = 32) -> tuple[int, ...]:
+    registers = tuple(register for register in range(register_count) if register not in excluded)
+    if len(registers) < count:
+        raise ValueError("not enough registers available for synthetic program construction")
+    return registers[:count]
 
 
 @dataclass(frozen=True)
@@ -58,6 +67,8 @@ def build_gold_program(
     *,
     result_register: int = RESULT_REGISTER,
 ) -> tuple[Instruction, ...]:
+    if operation not in VM_OPCODE_BY_TASK:
+        raise ValueError(f"unsupported operation {operation!r}")
     opcode = VM_OPCODE_BY_TASK[operation]
     program = (
         Instruction("CONST", dst=0, imm=lhs),
@@ -93,19 +104,22 @@ def build_max_program(lhs: int, rhs: int, *, result_register: int = RESULT_REGIS
 
 
 def build_sum_to_n_program(n: int, *, result_register: int = RESULT_REGISTER) -> tuple[Instruction, ...]:
-    counter_register = 1
-    one_register = 3
-    compare_register = 4
+    if n < 0:
+        raise ValueError("sum_to_n requires a non-negative integer")
+    limit_register, counter_register, one_register, compare_register = _allocate_temp_registers(
+        excluded={result_register},
+        count=4,
+    )
     program = _strip_instruction_labels(
         tuple(
             assemble(
                 [
-                    f"CONST dst=0 imm={n}",
+                    f"CONST dst={limit_register} imm={n}",
                     f"CONST dst={result_register} imm=0",
                     f"CONST dst={counter_register} imm=1",
                     f"CONST dst={one_register} imm=1",
                     "loop:",
-                    f"CMP_GT dst={compare_register} src1={counter_register} src2=0",
+                    f"CMP_GT dst={compare_register} src1={counter_register} src2={limit_register}",
                     "JGT label=done",
                     f"ADD dst={result_register} src1={result_register} src2={counter_register}",
                     f"ADD dst={counter_register} src1={counter_register} src2={one_register}",
@@ -173,6 +187,8 @@ def make_sum_to_n_task(
     *,
     result_register: int = RESULT_REGISTER,
 ) -> SyntheticTask:
+    if n < 0:
+        raise ValueError("sum_to_n requires a non-negative integer")
     return SyntheticTask(
         prompt=build_sum_to_n_prompt(n),
         expected_output=n * (n + 1) // 2,
@@ -193,14 +209,17 @@ def generate_synthetic_tasks(
     tasks: list[SyntheticTask] = []
     cached_values = list(values)
     requested_types = set(task_types)
+    unknown_task_types = requested_types - SUPPORTED_TASK_TYPES
+    if unknown_task_types:
+        raise ValueError(f"unsupported task type(s): {sorted(unknown_task_types)!r}")
+    unknown_operations = set(operations) - SUPPORTED_OPERATIONS
+    if unknown_operations:
+        raise ValueError(f"unsupported operation(s): {sorted(unknown_operations)!r}")
 
     if "arithmetic" in requested_types:
         for operation, lhs, rhs in product(operations, cached_values, cached_values):
-            if operation == "div":
-                if rhs == 0:
-                    continue
-                if lhs % rhs != 0:
-                    continue
+            if operation == "div" and rhs == 0:
+                continue
             tasks.append(make_synthetic_task(operation, lhs, rhs, result_register=result_register))
 
     if "max" in requested_types:

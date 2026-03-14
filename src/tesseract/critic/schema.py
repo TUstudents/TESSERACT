@@ -15,6 +15,7 @@ FailureType = Literal[
     "TYPE_ERROR",
     "TIMEOUT",
     "INVALID_OP",
+    "INVARIANT_VIOLATION",
     "UNKNOWN_FAILURE",
 ]
 
@@ -74,4 +75,10 @@ def summarize_trace(state: VMState) -> TraceSummary:
 def coerce_trace_entries(trace: VMState | list[TraceEntry] | tuple[TraceEntry, ...]) -> list[TraceEntry]:
     if isinstance(trace, VMState):
         return list(trace.trace)
-    return list(trace)
+    if not isinstance(trace, (list, tuple)):
+        raise TypeError("trace must be a VMState or a list/tuple of TraceEntry objects")
+    entries = list(trace)
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, TraceEntry):
+            raise TypeError(f"trace entry at index {index} is not a TraceEntry")
+    return entries

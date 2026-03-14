@@ -10,6 +10,8 @@ from .baseline import (
 from .interface import Compiler
 from .synthetic import (
     RESULT_REGISTER,
+    SUPPORTED_OPERATIONS,
+    SUPPORTED_TASK_TYPES,
     SyntheticTask,
     TaskExecutionResult,
     build_arithmetic_prompt,
@@ -38,6 +40,8 @@ from .training import (
 __all__ = [
     "Compiler",
     "RESULT_REGISTER",
+    "SUPPORTED_OPERATIONS",
+    "SUPPORTED_TASK_TYPES",
     "SyntheticTask",
     "TaskExecutionResult",
     "build_arithmetic_prompt",

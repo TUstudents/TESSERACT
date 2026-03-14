@@ -268,12 +268,14 @@ The VM package now exposes a usable public API for:
 
 ## Test Status
 
-Current test coverage is concentrated on VM and VM-tooling layers.
+Current test coverage spans the VM, VM tooling, compiler baseline, critic scaffold, and package import paths.
 
 Key test files:
 
 - `tests/test_vm.py`
 - `tests/test_vm_tooling.py`
+- `tests/test_compiler_baseline.py`
+- `tests/test_critic.py`
 - `tests/test_package.py`
 
 Covered areas:
@@ -295,6 +297,9 @@ Covered areas:
 - static validator rejection cases
 - program/state/trace/trap serialization round trips
 - replay consistency
+- synthetic task generation and execution agreement
+- compiler tokenization/training/evaluation behavior
+- critic differencing and invariant reporting
 - package import smoke tests
 
 Validated commands:

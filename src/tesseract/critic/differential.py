@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from .interface import Critic
 from .invariants import Invariant, evaluate_invariants
@@ -49,12 +49,14 @@ class DifferentialCritic(Critic):
         invariant_violations = evaluate_invariants(candidate_state, invariants)
         first_failing_step = self._first_failing_step(candidate_state, expected_state)
         failure_type = self._classify_failure(candidate_state, expected_state, first_failing_step)
+        if failure_type == "SUCCESS" and invariant_violations:
+            failure_type = "INVARIANT_VIOLATION"
         differing_registers = self._differing_registers(candidate_state, expected_state, first_failing_step)
         differing_addresses = self._differing_addresses(candidate_state, expected_state, first_failing_step)
         message = self._build_message(failure_type, first_failing_step, candidate_summary, expected_summary)
 
         report = CriticReport(
-            status="success" if failure_type == "SUCCESS" and not invariant_violations else "failure",
+            status="success" if failure_type == "SUCCESS" else "failure",
             failure_type=failure_type,
             first_failing_step=first_failing_step,
             message=message,
@@ -149,13 +151,24 @@ class DifferentialCritic(Critic):
         expected: VMState,
         first_failing_step: int | None,
     ) -> FailureType:
+        if first_failing_step is None:
+            if self._states_equivalent(candidate, expected):
+                return "SUCCESS"
+            differing_addresses = self._memory_differences(candidate.memory, expected.memory)
+            if differing_addresses:
+                return "WRONG_ADDRESS"
+            differing_registers = self._register_differences(candidate.registers, expected.registers)
+            if differing_registers:
+                return "WRONG_REGISTER"
+            if candidate.halt_reason in TRAP_TO_FAILURE_TYPE:
+                return TRAP_TO_FAILURE_TYPE[candidate.halt_reason]
+            return "WRONG_VALUE"
+
         candidate_trap = candidate.trace[-1].trap if candidate.trace and candidate.trace[-1].trap is not None else None
         if candidate_trap is not None:
             return TRAP_TO_FAILURE_TYPE.get(candidate_trap, "UNKNOWN_FAILURE")
         if candidate.halt_reason in TRAP_TO_FAILURE_TYPE:
             return TRAP_TO_FAILURE_TYPE[candidate.halt_reason]
-        if first_failing_step is None:
-            return "SUCCESS"
         if first_failing_step >= len(candidate.trace) or first_failing_step >= len(expected.trace):
             return "UNKNOWN_FAILURE"
 
@@ -172,18 +185,10 @@ class DifferentialCritic(Critic):
         candidate_memory = candidate_entry.post_state["memory"]
         expected_memory = expected_entry.post_state["memory"]
 
-        differing_addresses = {
-            address
-            for address in set(candidate_memory) | set(expected_memory)
-            if candidate_memory.get(address) != expected_memory.get(address)
-        }
+        differing_addresses = self._memory_differences(candidate_memory, expected_memory)
         if differing_addresses:
             return "WRONG_ADDRESS"
-        differing_registers = {
-            register
-            for register in set(candidate_registers) | set(expected_registers)
-            if candidate_registers.get(register) != expected_registers.get(register)
-        }
+        differing_registers = self._register_differences(candidate_registers, expected_registers)
         if differing_registers:
             return "WRONG_REGISTER"
         return "WRONG_VALUE"
@@ -194,16 +199,15 @@ class DifferentialCritic(Critic):
         expected: VMState,
         first_failing_step: int | None,
     ) -> tuple[int, ...]:
-        if first_failing_step is None or first_failing_step >= len(candidate.trace) or first_failing_step >= len(expected.trace):
+        if first_failing_step is None:
+            if self._states_equivalent(candidate, expected):
+                return ()
+            return self._register_differences(candidate.registers, expected.registers)
+        if first_failing_step >= len(candidate.trace) or first_failing_step >= len(expected.trace):
             return ()
         candidate_registers = candidate.trace[first_failing_step].post_state["registers"]
         expected_registers = expected.trace[first_failing_step].post_state["registers"]
-        registers = sorted(
-            register
-            for register in set(candidate_registers) | set(expected_registers)
-            if candidate_registers.get(register) != expected_registers.get(register)
-        )
-        return tuple(registers)
+        return self._register_differences(candidate_registers, expected_registers)
 
     def _differing_addresses(
         self,
@@ -211,10 +215,46 @@ class DifferentialCritic(Critic):
         expected: VMState,
         first_failing_step: int | None,
     ) -> tuple[int, ...]:
-        if first_failing_step is None or first_failing_step >= len(candidate.trace) or first_failing_step >= len(expected.trace):
+        if first_failing_step is None:
+            if self._states_equivalent(candidate, expected):
+                return ()
+            return self._memory_differences(candidate.memory, expected.memory)
+        if first_failing_step >= len(candidate.trace) or first_failing_step >= len(expected.trace):
             return ()
         candidate_memory = candidate.trace[first_failing_step].post_state["memory"]
         expected_memory = expected.trace[first_failing_step].post_state["memory"]
+        return self._memory_differences(candidate_memory, expected_memory)
+
+    def _states_equivalent(self, candidate: VMState, expected: VMState) -> bool:
+        return (
+            candidate.registers == expected.registers
+            and candidate.memory == expected.memory
+            and candidate.stack == expected.stack
+            and candidate.call_stack == expected.call_stack
+            and candidate.pc == expected.pc
+            and candidate.flags == expected.flags
+            and candidate.halted == expected.halted
+            and candidate.halt_reason == expected.halt_reason
+            and candidate.step_count == expected.step_count
+        )
+
+    def _register_differences(
+        self,
+        candidate_registers: Mapping[int, object],
+        expected_registers: Mapping[int, object],
+    ) -> tuple[int, ...]:
+        registers = sorted(
+            register
+            for register in set(candidate_registers) | set(expected_registers)
+            if candidate_registers.get(register) != expected_registers.get(register)
+        )
+        return tuple(registers)
+
+    def _memory_differences(
+        self,
+        candidate_memory: Mapping[int, object],
+        expected_memory: Mapping[int, object],
+    ) -> tuple[int, ...]:
         addresses = sorted(
             address
             for address in set(candidate_memory) | set(expected_memory)
@@ -231,6 +271,8 @@ class DifferentialCritic(Critic):
     ) -> str:
         if failure_type == "SUCCESS":
             return "candidate trace matches expected trace"
+        if failure_type == "INVARIANT_VIOLATION":
+            return "candidate trace matches expected trace but violates one or more invariants"
         if first_failing_step is None:
             return f"execution failed with {failure_type}"
         return (

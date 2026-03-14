@@ -104,6 +104,16 @@ def evaluate_compiler(
     *,
     vm: VM | None = None,
 ) -> EvaluationMetrics:
+    if not tasks:
+        return EvaluationMetrics(
+            exact_output_accuracy=0.0,
+            exact_program_match=0.0,
+            compile_validity_rate=0.0,
+            execution_success_rate=0.0,
+            average_program_length=0.0,
+            trap_rate=0.0,
+        )
+
     machine = vm if vm is not None else VM()
     exact_output = 0
     exact_program = 0
@@ -116,14 +126,19 @@ def evaluate_compiler(
         program = tuple(compiler.compile(task.prompt))
         total_program_length += len(program)
 
+        is_valid_program = False
         try:
             validate_program(program)
             compile_valid += 1
+            is_valid_program = True
         except ValidationError:
             pass
 
         if program == task.gold_program:
             exact_program += 1
+
+        if not is_valid_program:
+            continue
 
         try:
             state = machine.execute(program)
