@@ -146,7 +146,7 @@ Replace prompt regex normalization as the main semantic frontend with a learned 
 
 ---
 
-## 3. Expand task scope beyond arithmetic/max/sum-to-n
+## 3. Expand task scope beyond arithmetic/max/sum-to-n *(completed)*
 
 ### Goal
 
@@ -404,6 +404,6 @@ This order preserves the current exact-execution baseline while upgrading the le
 
 ## Immediate next action
 
-Start with **Step 3: expand task scope beyond arithmetic, max, and sum-to-n**.
+Start with **Step 4: strengthen the IR and value model toward the design document**.
 
-That is now the highest-leverage next change because the repository has both a small neural compiler and a small learned backbone, but evaluation scope is still too narrow to stress the architecture in the ways described by the design document.
+That is now the highest-leverage next change because the repository has a broader learned compiler/backbone path and expanded task coverage, but the executor is still much narrower than the design document’s richer machine model.

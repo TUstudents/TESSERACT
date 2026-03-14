@@ -22,9 +22,9 @@ from tesseract.vm import Instruction, VM, ValidationError, validate_program
 
 def _build_trained_nl_compiler() -> BackboneConditionedCompiler:
     nl_tasks = generate_nl_tasks(
-        task_types=("arithmetic", "max", "sum_to_n"),
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
         operations=("add", "sub"),
-        values=(1, 2, 3),
+        values=(1, 2),
         seed=0,
     )
     synthetic_tasks = [task.to_synthetic_task() for task in nl_tasks]
@@ -40,9 +40,9 @@ def _build_trained_nl_compiler() -> BackboneConditionedCompiler:
 
 def _build_trained_learned_backbone() -> LearnedBackbone:
     nl_tasks = generate_nl_tasks(
-        task_types=("arithmetic", "max", "sum_to_n"),
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
         operations=("add", "sub"),
-        values=(1, 2, 3),
+        values=(1, 2),
         seed=0,
         include_all_prompt_variants=True,
     )
@@ -54,9 +54,9 @@ def _build_trained_learned_backbone() -> LearnedBackbone:
 
 def _build_trained_learned_nl_compiler() -> BackboneConditionedCompiler:
     nl_tasks = generate_nl_tasks(
-        task_types=("arithmetic", "max", "sum_to_n"),
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
         operations=("add", "sub"),
-        values=(1, 2, 3),
+        values=(1, 2),
         seed=0,
         include_all_prompt_variants=True,
     )
@@ -75,7 +75,12 @@ def _build_trained_learned_nl_compiler() -> BackboneConditionedCompiler:
 
 
 def test_rule_based_backbone_encodes_supported_prompts() -> None:
-    tasks = generate_nl_tasks(task_types=("arithmetic", "max", "sum_to_n"), operations=("add",), values=(1, 2), seed=0)
+    tasks = generate_nl_tasks(
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
+        operations=("add",),
+        values=(1, 2),
+        seed=0,
+    )
     backbone = RuleBasedBackbone()
 
     outputs = [backbone.encode(task.prompt) for task in tasks]
@@ -104,6 +109,18 @@ def test_rule_based_backbone_encodes_supported_prompts() -> None:
         ("Sum numbers from 1 to 4", "sum_to_n", "sum_to_n 4"),
         ("Sum all integers up to 4", "sum_to_n", "sum_to_n 4"),
         ("Compute the triangular number of 4", "sum_to_n", "sum_to_n 4"),
+        ("Factorial of 4", "factorial", "factorial 4"),
+        ("Compute factorial of 4", "factorial", "factorial 4"),
+        ("What is the factorial of 4?", "factorial", "factorial 4"),
+        ("Fibonacci of 5", "fibonacci", "fibonacci 5"),
+        ("Compute fibonacci of 5", "fibonacci", "fibonacci 5"),
+        ("What is fibonacci of 5?", "fibonacci", "fibonacci 5"),
+        ("Absolute value of -3", "abs", "abs -3"),
+        ("Compute absolute value of -3", "abs", "abs -3"),
+        ("Return the absolute value of -3", "abs", "abs -3"),
+        ("Sum memory values 3 1 4", "memory_sum", "memory_sum 3 1 4"),
+        ("Compute memory sum 3 1 4", "memory_sum", "memory_sum 3 1 4"),
+        ("Add the memory cells 3 1 4", "memory_sum", "memory_sum 3 1 4"),
     ],
 )
 def test_rule_based_backbone_covers_all_supported_prompt_variants(
@@ -120,9 +137,9 @@ def test_rule_based_backbone_covers_all_supported_prompt_variants(
 def test_learned_backbone_overfits_scoped_nl_tasks() -> None:
     backbone = _build_trained_learned_backbone()
     tasks = generate_nl_tasks(
-        task_types=("arithmetic", "max", "sum_to_n"),
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
         operations=("add", "sub"),
-        values=(1, 2, 3),
+        values=(1, 2),
         seed=0,
     )
 
@@ -134,7 +151,7 @@ def test_learned_backbone_overfits_scoped_nl_tasks() -> None:
 
 def test_learned_backbone_training_is_seed_reproducible() -> None:
     tasks = generate_nl_tasks(
-        task_types=("arithmetic", "max", "sum_to_n"),
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
         operations=("add", "sub"),
         values=(1, 2),
         seed=0,
@@ -159,7 +176,7 @@ def test_backbone_conditioned_compiler_runs_end_to_end_on_nl_tasks() -> None:
     compiler = _build_trained_nl_compiler()
     vm = VM()
     tasks = generate_nl_tasks(
-        task_types=("arithmetic", "max", "sum_to_n"),
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
         operations=("add", "sub"),
         values=(1, 2),
         seed=0,
@@ -177,7 +194,7 @@ def test_learned_backbone_conditioned_compiler_runs_end_to_end_on_nl_tasks() -> 
     assert isinstance(compiler.backbone, LearnedBackbone)
     vm = VM()
     tasks = generate_nl_tasks(
-        task_types=("arithmetic", "max", "sum_to_n"),
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
         operations=("add", "sub"),
         values=(1, 2),
         seed=0,
@@ -216,11 +233,11 @@ def test_nl_pipeline_depends_on_emitted_ir_execution() -> None:
     good_result = compiler.execute(task.prompt)
     assert good_result.output == task.expected_output
 
-    def wrong_compile(self: Any, prompt: str):
-        del prompt
+    def wrong_compile_conditioned(self: Any, prompt: str, conditioning=None):
+        del prompt, conditioning
         return (Instruction("CONST", dst=2, imm=0), Instruction("HALT"))
 
-    cast(Any, compiler.compiler).compile = MethodType(wrong_compile, compiler.compiler)
+    cast(Any, compiler.compiler).compile_conditioned = MethodType(wrong_compile_conditioned, compiler.compiler)
     bad_result = compiler.execute(task.prompt)
 
     assert bad_result.output != task.expected_output
@@ -268,11 +285,11 @@ def test_invalid_ir_ablation_breaks_nl_execution_accuracy() -> None:
     compiler = _build_trained_nl_compiler()
     tasks = generate_nl_tasks(task_types=("arithmetic",), operations=("add",), values=(1, 2), seed=0)
 
-    def invalid_compile(self: Any, prompt: str):
-        del prompt
+    def invalid_compile_conditioned(self: Any, prompt: str, conditioning=None):
+        del prompt, conditioning
         return ()
 
-    cast(Any, compiler.compiler).compile = MethodType(invalid_compile, compiler.compiler)
+    cast(Any, compiler.compiler).compile_conditioned = MethodType(invalid_compile_conditioned, compiler.compiler)
 
     for task in tasks:
         compile_result = compiler.compile_with_backbone_output(task.prompt)

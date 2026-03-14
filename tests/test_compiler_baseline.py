@@ -20,9 +20,17 @@ from tesseract.compiler import (
     train_step,
 )
 from tesseract.compiler.synthetic import (
+    build_factorial_program,
+    build_fibonacci_program,
     build_max_program,
     build_sum_to_n_program,
+    evaluate_factorial,
+    evaluate_fibonacci,
     evaluate_operation,
+    make_abs_task,
+    make_factorial_task,
+    make_fibonacci_task,
+    make_memory_sum_task,
     make_sum_to_n_task,
     make_synthetic_task,
 )
@@ -30,7 +38,10 @@ from tesseract.vm import Instruction, ValidationError, assemble, validate_progra
 
 
 def test_generate_synthetic_tasks_have_valid_gold_programs() -> None:
-    tasks = generate_synthetic_tasks(task_types=("arithmetic", "max", "sum_to_n"), values=range(1, 4))
+    tasks = generate_synthetic_tasks(
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
+        values=range(1, 4),
+    )
 
     assert tasks
     program_lengths = {len(task.gold_program) for task in tasks}
@@ -86,7 +97,11 @@ def test_training_step_is_seed_reproducible() -> None:
 
 @pytest.fixture(scope="module")
 def trained_compiler() -> tuple[AutoregressiveCompiler, list]:
-    tasks = generate_synthetic_tasks(task_types=("arithmetic", "max", "sum_to_n"), operations=("add", "sub"), values=range(0, 4))
+    tasks = generate_synthetic_tasks(
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
+        operations=("add", "sub"),
+        values=range(0, 3),
+    )
     artifacts = build_vocabularies(tasks)
     batch = build_training_batch(
         tasks,
@@ -317,6 +332,30 @@ def test_evaluate_compiler_handles_empty_task_lists() -> None:
 def test_division_semantics_match_vm_truncation() -> None:
     assert evaluate_operation("div", -7, 2) == -3
     assert evaluate_operation("div", 7, -2) == -3
+
+
+def test_extended_task_builders_execute_correctly() -> None:
+    factorial_task = make_factorial_task(5)
+    fibonacci_task = make_fibonacci_task(7)
+    abs_task = make_abs_task(-9)
+    memory_sum_task = make_memory_sum_task((3, 1, 4))
+
+    assert execute_task(factorial_task).output == evaluate_factorial(5)
+    assert execute_task(fibonacci_task).output == evaluate_fibonacci(7)
+    assert execute_task(abs_task).output == 9
+    assert execute_task(memory_sum_task).output == 8
+
+
+@pytest.mark.parametrize(
+    ("builder", "value", "message"),
+    [
+        (build_factorial_program, -1, "factorial requires a non-negative integer"),
+        (build_fibonacci_program, -1, "fibonacci requires a non-negative integer"),
+    ],
+)
+def test_extended_unary_builders_reject_negative_inputs(builder, value: int, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        builder(value)
 
 
 def test_execute_task_uses_task_result_register() -> None:

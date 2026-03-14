@@ -23,7 +23,12 @@ from tesseract.evaluation import (
 
 
 def _build_trained_nl_compiler() -> BackboneConditionedCompiler:
-    nl_tasks = generate_nl_tasks(task_types=("arithmetic", "max", "sum_to_n"), operations=("add", "sub"), values=(1, 2, 3), seed=0)
+    nl_tasks = generate_nl_tasks(
+        task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
+        operations=("add", "sub"),
+        values=(1, 2),
+        seed=0,
+    )
     synthetic_tasks = [task.to_synthetic_task() for task in nl_tasks]
     artifacts = build_vocabularies(synthetic_tasks)
     batch = build_training_batch(
@@ -76,17 +81,18 @@ def test_run_nl_benchmark_reports_exact_execution_metrics() -> None:
     assert report.execution_success_rate == 1.0
     assert report.exact_program_match == 1.0
     assert report.average_program_length > 4.0
+    assert set(report.task_type_metrics()) == {"arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"}
 
 
 def test_run_nl_benchmark_records_timeout_failures_stably() -> None:
     compiler = _build_trained_nl_compiler()
     suite = build_nl_benchmark_suite(seed=0)
 
-    def looping_compile(self: Any, prompt: str):
-        del prompt
+    def looping_compile_conditioned(self: Any, prompt: str, conditioning=None):
+        del prompt, conditioning
         return (Instruction("JMP", imm=0), Instruction("HALT"))
 
-    cast(Any, compiler.compiler).compile = MethodType(looping_compile, compiler.compiler)
+    cast(Any, compiler.compiler).compile_conditioned = MethodType(looping_compile_conditioned, compiler.compiler)
     report = run_nl_benchmark(compiler, suite, vm=VM(step_budget=5))
 
     assert report.compile_validity_rate == 1.0
@@ -105,5 +111,7 @@ def test_benchmark_report_serialization_helpers() -> None:
     parsed = json.loads(payload)
     assert parsed["suite_name"] == suite.name
     assert "exact_output_accuracy" in parsed
+    assert "task_type_metrics" in parsed
     assert f"suite: {suite.name}" in text
     assert "execution_success_rate:" in text
+    assert "task_type[factorial]:" in text

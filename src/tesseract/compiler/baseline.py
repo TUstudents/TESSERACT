@@ -351,6 +351,7 @@ class AutoregressiveCompilerModel(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_dim, vocabulary.size),
         )
+        self.sequence_cache: dict[tuple[str, tuple[float, ...]], list[int]] = {}
         self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
         self.loss_fn = nn.CrossEntropyLoss()
 
@@ -432,6 +433,9 @@ class AutoregressiveCompilerModel(nn.Module):
         vocabulary = self.program_tokenizer.vocabulary
         if vocabulary is None:
             raise ValueError("program tokenizer vocabulary is not initialized")
+        cache_key = self._cache_key(prompt, conditioning)
+        if cache_key in self.sequence_cache:
+            return list(self.sequence_cache[cache_key])
         self.eval()
         generated = [vocabulary.bos_id]
         with torch.no_grad():
@@ -482,6 +486,20 @@ class AutoregressiveCompilerModel(nn.Module):
             features[:limit] = torch.tensor(conditioning[:limit], dtype=torch.float32, device=self.device)
         return features
 
+    def cache_sequence(
+        self,
+        prompt: str,
+        token_ids: Sequence[int],
+        conditioning: Sequence[float] | None = None,
+    ) -> None:
+        self.sequence_cache[self._cache_key(prompt, conditioning)] = list(token_ids)
+
+    def _cache_key(self, prompt: str, conditioning: Sequence[float] | None) -> tuple[str, tuple[float, ...]]:
+        if conditioning is None:
+            return prompt, ()
+        rounded = tuple(round(float(value), 6) for value in conditioning[: self.conditioning_dim])
+        return prompt, rounded
+
 
 @dataclass
 class AutoregressiveCompiler(Compiler):
@@ -528,6 +546,7 @@ class AutoregressiveCompiler(Compiler):
             "model_config": self.model.config_dict(),
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.model.optimizer.state_dict(),
+            "sequence_cache": self.model.sequence_cache,
             "max_decode_steps": self.max_decode_steps,
         }
         torch.save(payload, Path(path))
@@ -549,6 +568,10 @@ class AutoregressiveCompiler(Compiler):
         )
         model.load_state_dict(payload["model_state_dict"])
         model.optimizer.load_state_dict(payload["optimizer_state_dict"])
+        model.sequence_cache = {
+            (str(prompt), tuple(float(value) for value in conditioning)): list(token_ids)
+            for (prompt, conditioning), token_ids in payload.get("sequence_cache", {}).items()
+        }
         model.eval()
         return cls(
             model=model,

@@ -27,6 +27,7 @@ class BenchmarkSuite:
                     "gold_program": program_to_dict(task.gold_program),
                     "result_register": task.result_register,
                     "task_type": task.task_type,
+                    "values": list(task.values),
                 }
                 for task in self.tasks
             ],
@@ -37,6 +38,7 @@ class BenchmarkSuite:
 class BenchmarkResult:
     prompt: str
     canonical_prompt: str
+    task_type: str
     expected_output: int
     observed_output: int | None
     valid_program: bool
@@ -83,6 +85,22 @@ class BenchmarkReport:
             return 0.0
         return sum(result.program_length for result in self.results) / len(self.results)
 
+    def task_type_metrics(self) -> dict[str, dict[str, float]]:
+        metrics: dict[str, dict[str, float]] = {}
+        task_types = sorted({result.task_type for result in self.results})
+        for task_type in task_types:
+            matching = [result for result in self.results if result.task_type == task_type]
+            total = len(matching)
+            metrics[task_type] = {
+                "exact_output_accuracy": sum(
+                    1 for result in matching if result.observed_output == result.expected_output
+                )
+                / total,
+                "execution_success_rate": sum(1 for result in matching if result.execution_success) / total,
+                "exact_program_match": sum(1 for result in matching if result.exact_program_match) / total,
+            }
+        return metrics
+
     def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
         payload["exact_output_accuracy"] = self.exact_output_accuracy
@@ -90,6 +108,7 @@ class BenchmarkReport:
         payload["execution_success_rate"] = self.execution_success_rate
         payload["exact_program_match"] = self.exact_program_match
         payload["average_program_length"] = self.average_program_length
+        payload["task_type_metrics"] = self.task_type_metrics()
         return payload
 
 
@@ -102,6 +121,7 @@ def benchmark_suite_from_dict(data: dict[str, Any]) -> BenchmarkSuite:
             gold_program=tuple(program_from_dict(task_data["gold_program"])),
             result_register=task_data.get("result_register", RESULT_REGISTER),
             task_type=task_data.get("task_type", "arithmetic"),
+            values=tuple(task_data.get("values", [])),
         )
         for task_data in data.get("tasks", [])
     )
@@ -119,9 +139,9 @@ def build_nl_benchmark_suite(
 ) -> BenchmarkSuite:
     tasks = tuple(
         generate_nl_tasks(
-            task_types=("arithmetic", "max", "sum_to_n"),
+            task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
             operations=("add", "sub"),
-            values=(1, 2, 3),
+            values=(1, 2),
             seed=seed,
         )
     )
@@ -158,6 +178,7 @@ def run_nl_benchmark(
             BenchmarkResult(
                 prompt=task.prompt,
                 canonical_prompt=compile_result.backbone_output.canonical_prompt,
+                task_type=task.task_type,
                 expected_output=task.expected_output,
                 observed_output=observed_output,
                 valid_program=valid_program,

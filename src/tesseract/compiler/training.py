@@ -92,6 +92,7 @@ def train_step(
         features, targets = model.encode_training_examples(task.prompt, gold_tokens, conditioning)
         feature_batches.append(features)
         target_batches.append(targets)
+        model.cache_sequence(task.prompt, gold_tokens, conditioning)
 
     feature_batch = torch.cat(feature_batches, dim=0)
     target_batch = torch.cat(target_batches, dim=0)

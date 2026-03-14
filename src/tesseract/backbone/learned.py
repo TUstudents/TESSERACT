@@ -213,4 +213,12 @@ def _parse_canonical_prompt(canonical_prompt: str) -> tuple[str, tuple[int, ...]
         return "max", (int(parts[1]), int(parts[2])), {}
     if parts[0] == "sum_to_n" and len(parts) == 2:
         return "sum_to_n", (int(parts[1]),), {}
+    if parts[0] == "factorial" and len(parts) == 2:
+        return "factorial", (int(parts[1]),), {}
+    if parts[0] == "fibonacci" and len(parts) == 2:
+        return "fibonacci", (int(parts[1]),), {}
+    if parts[0] == "abs" and len(parts) == 2:
+        return "abs", (int(parts[1]),), {}
+    if parts[0] == "memory_sum":
+        return "memory_sum", tuple(int(part) for part in parts[1:]), {}
     raise ValueError(f"unsupported canonical prompt {canonical_prompt!r}")

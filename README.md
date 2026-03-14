@@ -49,4 +49,4 @@ Current reference-VM policy:
 
 ## Status
 
-The repository now includes a tested VM/IR core, validation/assembly/serialization tooling, a synthetic compiler stack with a small neural autoregressive decoder plus a retained count-based baseline for comparison, both rule-based and learned NL backbone paths, a deterministic repair loop scaffold, and reproducible benchmark/reporting helpers. The next major milestones are broadening task scope, enriching IR/value semantics, and improving critic/repair learning while preserving the now-wired NL, repair, and evaluation plumbing.
+The repository now includes a tested VM/IR core, validation/assembly/serialization tooling, a synthetic compiler stack with a small neural autoregressive decoder plus a retained count-based baseline for comparison, both rule-based and learned NL backbone paths, broader task coverage spanning arithmetic/control-flow/loop/memory families, a deterministic repair loop scaffold, and reproducible benchmark/reporting helpers. The next major milestones are enriching IR/value semantics and improving critic/repair learning while preserving the now-wired NL, repair, and evaluation plumbing.
