@@ -1,0 +1,281 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Collection, Final, Literal, cast
+
+from .ir import Instruction, VALID_OPCODES, VALID_TYPE_TAGS
+
+RegisterType = Literal["bool", "int", "i32", "i64", "checked_i32"]
+CONTROL_FLOW_OPCODES: Final[frozenset[str]] = frozenset({"JMP", "JZ", "JNZ", "JLT", "JGT", "CALL"})
+
+
+@dataclass
+class ValidationError(Exception):
+    message: str
+    index: int | None = None
+
+    def __str__(self) -> str:
+        if self.index is None:
+            return self.message
+        return f"instruction {self.index}: {self.message}"
+
+
+@dataclass(frozen=True)
+class TypeCheckResult:
+    register_types: dict[int, RegisterType]
+
+
+INT_TYPE_TAGS: Final[frozenset[RegisterType]] = frozenset({"int", "i32", "i64", "checked_i32"})
+BOOL_TYPE_TAGS: Final[frozenset[RegisterType]] = frozenset({"bool"})
+
+
+def validate_program(
+    program: list[Instruction] | tuple[Instruction, ...],
+    *,
+    register_count: int = 32,
+    allow_unresolved_labels: bool = False,
+) -> TypeCheckResult:
+    register_types: dict[int, RegisterType] = {}
+
+    for index, instruction in enumerate(program):
+        _validate_instruction_shape(
+            instruction,
+            index=index,
+            register_count=register_count,
+            allow_unresolved_labels=allow_unresolved_labels,
+        )
+        _update_type_environment(register_types, instruction, index=index)
+
+    return TypeCheckResult(register_types=dict(register_types))
+
+
+def _validate_instruction_shape(
+    instruction: Instruction,
+    *,
+    index: int,
+    register_count: int,
+    allow_unresolved_labels: bool,
+) -> None:
+    opcode = instruction.opcode
+    if opcode not in VALID_OPCODES:
+        raise ValidationError(f"invalid opcode {opcode!r}", index=index)
+    if instruction.type_tag is not None and instruction.type_tag not in VALID_TYPE_TAGS:
+        raise ValidationError(f"invalid type tag {instruction.type_tag!r}", index=index)
+
+    def ensure_register(name: str, value: int | None, *, required: bool) -> None:
+        if value is None:
+            if required:
+                raise ValidationError(f"missing register operand {name}", index=index)
+            return
+        if not 0 <= value < register_count:
+            raise ValidationError(f"register {name}={value} out of range", index=index)
+
+    def ensure_no_register(name: str, value: int | None) -> None:
+        if value is not None:
+            raise ValidationError(f"unexpected register operand {name}", index=index)
+
+    def ensure_target(*, required: bool) -> None:
+        has_imm = isinstance(instruction.imm, int) and not isinstance(instruction.imm, bool)
+        has_label = instruction.label is not None
+        if required and not has_imm and not has_label:
+            raise ValidationError("missing branch target", index=index)
+        if has_label and not allow_unresolved_labels and not has_imm:
+            raise ValidationError("unresolved label target", index=index)
+        if instruction.label is not None and opcode not in CONTROL_FLOW_OPCODES:
+            raise ValidationError("labels are only valid on control-flow instructions", index=index)
+
+    if opcode == "HALT" or opcode == "RET":
+        ensure_no_register("dst", instruction.dst)
+        ensure_no_register("src1", instruction.src1)
+        ensure_no_register("src2", instruction.src2)
+        if instruction.imm is not None:
+            raise ValidationError("unexpected immediate operand", index=index)
+        return
+
+    if opcode == "CONST":
+        ensure_register("dst", instruction.dst, required=True)
+        ensure_no_register("src1", instruction.src1)
+        ensure_no_register("src2", instruction.src2)
+        if instruction.imm is None:
+            raise ValidationError("missing immediate operand", index=index)
+        if isinstance(instruction.imm, bool) and instruction.type_tag not in {None, "bool"}:
+            raise ValidationError("boolean immediate requires bool type tag", index=index)
+        if isinstance(instruction.imm, int) and not isinstance(instruction.imm, bool):
+            return
+        if isinstance(instruction.imm, bool):
+            return
+        raise ValidationError("unsupported immediate type", index=index)
+
+    if opcode == "MOV":
+        ensure_register("dst", instruction.dst, required=True)
+        ensure_register("src1", instruction.src1, required=True)
+        ensure_no_register("src2", instruction.src2)
+        if instruction.imm is not None:
+            raise ValidationError("unexpected immediate operand", index=index)
+        return
+
+    if opcode in {"ADD", "SUB", "MUL", "DIV", "AND", "OR", "XOR", "CMP_EQ", "CMP_LT", "CMP_GT"}:
+        ensure_register("dst", instruction.dst, required=True)
+        ensure_register("src1", instruction.src1, required=True)
+        ensure_register("src2", instruction.src2, required=True)
+        if instruction.imm is not None:
+            raise ValidationError("unexpected immediate operand", index=index)
+        return
+
+    if opcode == "NOT":
+        ensure_register("dst", instruction.dst, required=True)
+        ensure_register("src1", instruction.src1, required=True)
+        ensure_no_register("src2", instruction.src2)
+        if instruction.imm is not None:
+            raise ValidationError("unexpected immediate operand", index=index)
+        return
+
+    if opcode == "JMP" or opcode == "CALL" or opcode == "JLT" or opcode == "JGT":
+        ensure_no_register("dst", instruction.dst)
+        ensure_no_register("src1", instruction.src1)
+        ensure_no_register("src2", instruction.src2)
+        ensure_target(required=True)
+        return
+
+    if opcode == "JZ" or opcode == "JNZ":
+        ensure_no_register("dst", instruction.dst)
+        ensure_register("src1", instruction.src1, required=True)
+        ensure_no_register("src2", instruction.src2)
+        ensure_target(required=True)
+        return
+
+    if opcode == "LOAD":
+        ensure_register("dst", instruction.dst, required=True)
+        ensure_register("src1", instruction.src1, required=True)
+        ensure_no_register("src2", instruction.src2)
+        if instruction.imm is not None and not isinstance(instruction.imm, int):
+            raise ValidationError("load offset must be an integer", index=index)
+        return
+
+    if opcode == "STORE":
+        ensure_no_register("dst", instruction.dst)
+        ensure_register("src1", instruction.src1, required=True)
+        ensure_register("src2", instruction.src2, required=True)
+        if instruction.imm is not None and not isinstance(instruction.imm, int):
+            raise ValidationError("store offset must be an integer", index=index)
+        return
+
+    if opcode == "PUSH":
+        ensure_no_register("dst", instruction.dst)
+        ensure_register("src1", instruction.src1, required=True)
+        ensure_no_register("src2", instruction.src2)
+        if instruction.imm is not None:
+            raise ValidationError("unexpected immediate operand", index=index)
+        return
+
+    if opcode == "POP":
+        ensure_register("dst", instruction.dst, required=True)
+        ensure_no_register("src1", instruction.src1)
+        ensure_no_register("src2", instruction.src2)
+        if instruction.imm is not None:
+            raise ValidationError("unexpected immediate operand", index=index)
+        return
+
+
+def _update_type_environment(
+    register_types: dict[int, RegisterType],
+    instruction: Instruction,
+    *,
+    index: int,
+) -> None:
+    opcode = instruction.opcode
+
+    def expect_type(register: int | None, allowed: Collection[RegisterType]) -> RegisterType | None:
+        assert register is not None
+        known = register_types.get(register)
+        if known is not None and known not in allowed:
+            raise ValidationError(
+                f"register r{register} has type {known!r}, expected one of {sorted(allowed)!r}",
+                index=index,
+            )
+        return known
+
+    if opcode == "CONST":
+        assert instruction.dst is not None
+        if isinstance(instruction.imm, bool):
+            register_types[instruction.dst] = "bool"
+        elif instruction.type_tag in INT_TYPE_TAGS:
+            register_types[instruction.dst] = cast(RegisterType, instruction.type_tag)
+        else:
+            register_types[instruction.dst] = "int"
+        return
+
+    if opcode == "MOV":
+        assert instruction.dst is not None and instruction.src1 is not None
+        source_type = register_types.get(instruction.src1)
+        if instruction.type_tag == "bool":
+            if source_type is not None and source_type != "bool":
+                raise ValidationError("cannot move non-bool into bool destination", index=index)
+            register_types[instruction.dst] = "bool"
+        elif instruction.type_tag in INT_TYPE_TAGS:
+            if source_type is not None and source_type == "bool":
+                raise ValidationError("cannot move bool into integer destination", index=index)
+            register_types[instruction.dst] = cast(RegisterType, instruction.type_tag)
+        elif source_type is not None:
+            register_types[instruction.dst] = source_type
+        return
+
+    if opcode in {"ADD", "SUB", "MUL", "DIV", "CMP_LT", "CMP_GT"}:
+        expect_type(instruction.src1, INT_TYPE_TAGS)
+        expect_type(instruction.src2, INT_TYPE_TAGS)
+        if instruction.dst is not None:
+            if opcode in {"CMP_LT", "CMP_GT"}:
+                register_types[instruction.dst] = "bool"
+            else:
+                register_types[instruction.dst] = (
+                    cast(RegisterType, instruction.type_tag) if instruction.type_tag in INT_TYPE_TAGS else "int"
+                )
+        return
+
+    if opcode in {"AND", "OR", "XOR", "NOT"}:
+        expect_type(instruction.src1, BOOL_TYPE_TAGS)
+        if opcode != "NOT":
+            expect_type(instruction.src2, BOOL_TYPE_TAGS)
+        if instruction.dst is not None:
+            register_types[instruction.dst] = "bool"
+        return
+
+    if opcode == "CMP_EQ":
+        assert instruction.dst is not None and instruction.src1 is not None and instruction.src2 is not None
+        lhs = register_types.get(instruction.src1)
+        rhs = register_types.get(instruction.src2)
+        if lhs is not None and rhs is not None and lhs != rhs:
+            raise ValidationError("CMP_EQ operands must have matching static types", index=index)
+        register_types[instruction.dst] = "bool"
+        return
+
+    if opcode == "LOAD":
+        expect_type(instruction.src1, INT_TYPE_TAGS)
+        assert instruction.dst is not None
+        if instruction.type_tag == "bool":
+            register_types[instruction.dst] = "bool"
+        elif instruction.type_tag in INT_TYPE_TAGS:
+            register_types[instruction.dst] = cast(RegisterType, instruction.type_tag)
+        return
+
+    if opcode == "STORE":
+        expect_type(instruction.src1, INT_TYPE_TAGS)
+        assert instruction.src2 is not None
+        source_type = register_types.get(instruction.src2)
+        if instruction.type_tag == "bool" and source_type is not None and source_type != "bool":
+            raise ValidationError("STORE type tag bool conflicts with integer source", index=index)
+        if instruction.type_tag in INT_TYPE_TAGS and source_type == "bool":
+            raise ValidationError("STORE integer type tag conflicts with bool source", index=index)
+        return
+
+    if opcode == "PUSH":
+        return
+
+    if opcode == "POP":
+        return
+
+    if opcode in {"JMP", "JLT", "JGT", "CALL", "RET", "HALT"}:
+        return
+
+    if opcode in {"JZ", "JNZ"}:
+        return
