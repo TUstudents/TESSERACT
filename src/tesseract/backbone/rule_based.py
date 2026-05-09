@@ -217,7 +217,8 @@ class RuleBasedBackbone(Backbone):
                 return ()
             if prompt.startswith(prefix):
                 suffix = prompt[len(prefix) :]
-                values = tuple(int(token) for token in re.findall(_INT_PATTERN, suffix))
-                if suffix and values:
+                tokens = suffix.replace(",", " ").split()
+                if tokens and all(re.fullmatch(_INT_PATTERN, token) for token in tokens):
+                    values = tuple(int(token) for token in tokens)
                     return values
         return None

@@ -7,6 +7,8 @@ import pytest
 import torch
 
 from tesseract.backbone import (
+    BackboneTrainingBatch,
+    CanonicalPromptVocabulary,
     LearnedBackbone,
     RuleBasedBackbone,
     build_backbone_training_batch,
@@ -119,6 +121,7 @@ def test_rule_based_backbone_encodes_supported_prompts() -> None:
         ("Compute absolute value of -3", "abs", "abs -3"),
         ("Return the absolute value of -3", "abs", "abs -3"),
         ("Sum memory values 3 1 4", "memory_sum", "memory_sum 3 1 4"),
+        ("Sum memory values 3, 1, 4", "memory_sum", "memory_sum 3 1 4"),
         ("Compute memory sum 3 1 4", "memory_sum", "memory_sum 3 1 4"),
         ("Add the memory cells 3 1 4", "memory_sum", "memory_sum 3 1 4"),
     ],
@@ -132,6 +135,19 @@ def test_rule_based_backbone_covers_all_supported_prompt_variants(
 
     assert output.task_type == task_type
     assert output.canonical_prompt == canonical_prompt
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Sum memory values 3 apples 4",
+        "Compute memory sum 1.5",
+        "Add the memory cells --1 2",
+    ],
+)
+def test_rule_based_backbone_rejects_malformed_memory_sum_values(prompt: str) -> None:
+    with pytest.raises(ValueError, match="unsupported natural-language prompt"):
+        RuleBasedBackbone().encode(prompt)
 
 
 def test_learned_backbone_overfits_scoped_nl_tasks() -> None:
@@ -170,6 +186,41 @@ def test_learned_backbone_training_is_seed_reproducible() -> None:
     second_prompts = [second.encode(task.prompt).canonical_prompt for task in tasks]
 
     assert first_prompts == second_prompts
+
+
+def test_learned_backbone_vocabulary_normalizes_punctuation() -> None:
+    tasks = generate_nl_tasks(
+        task_types=("arithmetic", "max"),
+        operations=("add",),
+        values=(1, 2),
+        seed=0,
+        include_all_prompt_variants=True,
+    )
+    backbone = build_learned_backbone(tasks)
+
+    assert backbone.model.vocabulary.encode("What is 1 plus 2?") == backbone.model.vocabulary.encode(
+        "what is 1 plus 2."
+    )
+    assert backbone.model.vocabulary.encode("Which number is larger: 1 or 2?") == backbone.model.vocabulary.encode(
+        "which number is larger 1 or 2"
+    )
+
+
+def test_learned_backbone_rejects_empty_training_set() -> None:
+    with pytest.raises(ValueError, match="at least one training task"):
+        build_learned_backbone([])
+    with pytest.raises(ValueError, match="at least one task"):
+        CanonicalPromptVocabulary.from_tasks([])
+
+
+def test_backbone_training_validation_rejects_malformed_batches() -> None:
+    tasks = generate_nl_tasks(task_types=("arithmetic",), operations=("add",), values=(1,), seed=0)
+    backbone = build_learned_backbone(tasks)
+
+    with pytest.raises(ValueError, match="same length"):
+        train_backbone_step(backbone.model, BackboneTrainingBatch(prompts=["What is 1 plus 1?"], target_ids=[]))
+    with pytest.raises(ValueError, match="invalid target id"):
+        train_backbone_step(backbone.model, BackboneTrainingBatch(prompts=["What is 1 plus 1?"], target_ids=[999]))
 
 
 def test_backbone_conditioned_compiler_runs_end_to_end_on_nl_tasks() -> None:

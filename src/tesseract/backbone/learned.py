@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import torch
@@ -9,6 +10,12 @@ from tesseract.backbone.interface import Backbone, BackboneOutput
 from tesseract.compiler.synthetic import RESULT_REGISTER
 
 from .datasets import NaturalLanguageTask
+
+_PROMPT_TOKEN_PATTERN = re.compile(r"-?\d+|[a-z_]+")
+
+
+def _tokenize_prompt(prompt: str) -> list[str]:
+    return _PROMPT_TOKEN_PATTERN.findall(prompt.lower())
 
 
 @dataclass(frozen=True)
@@ -20,13 +27,13 @@ class BackboneVocabulary:
 
     @classmethod
     def from_tasks(cls, tasks: list[NaturalLanguageTask]) -> BackboneVocabulary:
-        tokens = sorted({token for task in tasks for token in task.prompt.lower().split()})
+        tokens = sorted({token for task in tasks for token in _tokenize_prompt(task.prompt)})
         itos = ["<pad>", "<unk>", *tokens]
         stoi = {token: index for index, token in enumerate(itos)}
         return cls(stoi=stoi, itos=itos)
 
     def encode(self, prompt: str) -> list[int]:
-        return [self.stoi.get(token, self.unk_id) for token in prompt.lower().split()]
+        return [self.stoi.get(token, self.unk_id) for token in _tokenize_prompt(prompt)]
 
     @property
     def size(self) -> int:
@@ -48,6 +55,8 @@ class CanonicalPromptVocabulary:
 
     @classmethod
     def from_tasks(cls, tasks: list[NaturalLanguageTask]) -> CanonicalPromptVocabulary:
+        if not tasks:
+            raise ValueError("canonical prompt vocabulary requires at least one task")
         prompts = sorted({task.canonical_prompt for task in tasks})
         return cls(stoi={prompt: index for index, prompt in enumerate(prompts)}, itos=prompts)
 
@@ -153,6 +162,11 @@ def build_backbone_training_batch(
     *,
     canonical_vocabulary: CanonicalPromptVocabulary,
 ) -> BackboneTrainingBatch:
+    missing_prompts = sorted(
+        {task.canonical_prompt for task in tasks if task.canonical_prompt not in canonical_vocabulary.stoi}
+    )
+    if missing_prompts:
+        raise ValueError(f"canonical prompt(s) missing from vocabulary: {missing_prompts!r}")
     return BackboneTrainingBatch(
         prompts=[task.prompt for task in tasks],
         target_ids=[canonical_vocabulary.stoi[task.canonical_prompt] for task in tasks],
@@ -165,6 +179,15 @@ def train_backbone_step(
     *,
     epochs: int = 256,
 ) -> dict[str, float]:
+    if len(batch.prompts) != len(batch.target_ids):
+        raise ValueError("backbone training batch prompts and target_ids must have the same length")
+    invalid_targets = [
+        target_id
+        for target_id in batch.target_ids
+        if target_id < 0 or target_id >= model.canonical_vocabulary.size
+    ]
+    if invalid_targets:
+        raise ValueError(f"backbone training batch contains invalid target id(s): {invalid_targets!r}")
     if not batch.prompts:
         return {"loss": 0.0, "accuracy": 0.0}
 
@@ -194,6 +217,8 @@ def train_backbone_step(
 
 
 def build_learned_backbone(tasks: list[NaturalLanguageTask]) -> LearnedBackbone:
+    if not tasks:
+        raise ValueError("learned backbone requires at least one training task")
     vocabulary = BackboneVocabulary.from_tasks(tasks)
     canonical_vocabulary = CanonicalPromptVocabulary.from_tasks(tasks)
     model = LearnedBackboneModel(vocabulary=vocabulary, canonical_vocabulary=canonical_vocabulary)
