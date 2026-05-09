@@ -7,6 +7,7 @@ from .ir import Instruction, VALID_OPCODES, VALID_TYPE_TAGS
 
 RegisterType = Literal["bool", "int", "i32", "i64", "checked_i32", "checked_i64", "f32", "addr"]
 CONTROL_FLOW_OPCODES: Final[frozenset[str]] = frozenset({"JMP", "JZ", "JNZ", "JLT", "JGT", "CALL"})
+TYPE_TAGGED_OPCODES: Final[frozenset[str]] = frozenset({"CONST", "MOV", "ADD", "SUB", "MUL", "DIV", "LOAD", "STORE"})
 
 
 class ValidationError(Exception):
@@ -52,6 +53,7 @@ def validate_program(
         _validate_instruction_shape(
             instruction,
             index=index,
+            program_length=len(program),
             register_count=register_count,
             allow_unresolved_labels=allow_unresolved_labels,
         )
@@ -64,6 +66,7 @@ def _validate_instruction_shape(
     instruction: Instruction,
     *,
     index: int,
+    program_length: int,
     register_count: int,
     allow_unresolved_labels: bool,
 ) -> None:
@@ -72,6 +75,8 @@ def _validate_instruction_shape(
         raise ValidationError(f"invalid opcode {opcode!r}", index=index)
     if instruction.type_tag is not None and instruction.type_tag not in VALID_TYPE_TAGS:
         raise ValidationError(f"invalid type tag {instruction.type_tag!r}", index=index)
+    if instruction.type_tag is not None and opcode not in TYPE_TAGGED_OPCODES:
+        raise ValidationError(f"type tag is not valid for opcode {opcode!r}", index=index)
     if instruction.label is not None and opcode not in CONTROL_FLOW_OPCODES:
         raise ValidationError("labels are only valid on control-flow instructions", index=index)
 
@@ -94,6 +99,8 @@ def _validate_instruction_shape(
             raise ValidationError("missing branch target", index=index)
         if has_label and not allow_unresolved_labels and not has_imm:
             raise ValidationError("unresolved label target", index=index)
+        if has_imm and not 0 <= cast(int, instruction.imm) < program_length:
+            raise ValidationError("branch target out of range", index=index)
 
     if opcode in {"HALT", "RET"}:
         ensure_no_register("dst", instruction.dst)
@@ -244,7 +251,7 @@ def _update_type_environment(
             register_types[dst] = source_type
         return
 
-    if opcode in {"ADD", "SUB", "MUL", "DIV", "CMP_LT", "CMP_GT"}:
+    if opcode in {"ADD", "SUB", "MUL", "DIV"}:
         src1 = require_register(instruction.src1, "src1")
         src2 = require_register(instruction.src2, "src2")
         lhs = register_types.get(src1)
@@ -261,14 +268,27 @@ def _update_type_environment(
             if lhs_is_float != rhs_is_float:
                 raise ValidationError("arithmetic operands must both be integer-like or both be f32", index=index)
         if instruction.dst is not None:
-            if opcode in {"CMP_LT", "CMP_GT"}:
-                register_types[instruction.dst] = "bool"
-            elif instruction.type_tag in INT_TYPE_TAGS | FLOAT_TYPE_TAGS:
+            if instruction.type_tag in INT_TYPE_TAGS | FLOAT_TYPE_TAGS:
                 register_types[instruction.dst] = cast(RegisterType, instruction.type_tag)
             elif lhs in FLOAT_TYPE_TAGS and rhs in FLOAT_TYPE_TAGS:
                 register_types[instruction.dst] = "f32"
             else:
                 register_types[instruction.dst] = "int"
+        return
+
+    if opcode in {"CMP_LT", "CMP_GT"}:
+        dst = require_register(instruction.dst, "dst")
+        src1 = require_register(instruction.src1, "src1")
+        src2 = require_register(instruction.src2, "src2")
+        lhs = register_types.get(src1)
+        rhs = register_types.get(src2)
+        numeric_types = INT_TYPE_TAGS | FLOAT_TYPE_TAGS
+        expect_type(src1, numeric_types, "src1")
+        expect_type(src2, numeric_types, "src2")
+        if lhs in FLOAT_TYPE_TAGS or rhs in FLOAT_TYPE_TAGS:
+            if lhs not in FLOAT_TYPE_TAGS or rhs not in FLOAT_TYPE_TAGS:
+                raise ValidationError("comparison operands must both be integer-like or both be f32", index=index)
+        register_types[dst] = "bool"
         return
 
     if opcode in {"AND", "OR", "XOR", "NOT"}:

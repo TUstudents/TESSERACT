@@ -71,6 +71,11 @@ def test_disassemble_preserves_out_of_range_branch_targets_as_immediates() -> No
     assert text == ["JMP imm=99", "HALT"]
 
 
+def test_validate_program_rejects_out_of_range_branch_target() -> None:
+    with pytest.raises(ValidationError, match="branch target out of range"):
+        validate_program([Instruction("JMP", imm=99), Instruction("HALT")])
+
+
 def test_validate_program_rejects_invalid_register() -> None:
     with pytest.raises(ValidationError, match="out of range"):
         validate_program([Instruction("CONST", dst=99, imm=1), Instruction("HALT")])
@@ -96,6 +101,11 @@ def test_validate_program_rejects_unresolved_label() -> None:
 def test_assemble_rejects_undefined_label() -> None:
     with pytest.raises(ValidationError, match="undefined label"):
         assemble(["JMP label=missing"])
+
+
+def test_assemble_rejects_out_of_range_branch_target() -> None:
+    with pytest.raises(ValidationError, match="branch target out of range"):
+        assemble(["JMP imm=99", "HALT"])
 
 
 def test_assemble_rejects_duplicate_label() -> None:
@@ -195,6 +205,47 @@ def test_validate_program_rejects_mixed_float_and_integer_arithmetic() -> None:
 
     with pytest.raises(ValidationError, match="expected one of"):
         validate_program(program)
+
+
+def test_validate_program_accepts_f32_comparison_without_type_tag() -> None:
+    result = validate_program(
+        [
+            Instruction("CONST", dst=0, imm=1.5, type_tag="f32"),
+            Instruction("CONST", dst=1, imm=2.0, type_tag="f32"),
+            Instruction("CMP_LT", dst=2, src1=0, src2=1),
+            Instruction("HALT"),
+        ]
+    )
+
+    assert result.register_types[2] == "bool"
+
+
+def test_validate_program_rejects_mixed_f32_and_integer_comparison() -> None:
+    with pytest.raises(ValidationError, match="comparison operands"):
+        validate_program(
+            [
+                Instruction("CONST", dst=0, imm=1.5, type_tag="f32"),
+                Instruction("CONST", dst=1, imm=2),
+                Instruction("CMP_LT", dst=2, src1=0, src2=1),
+                Instruction("HALT"),
+            ]
+        )
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        Instruction("HALT", type_tag="int"),
+        Instruction("JMP", imm=1, type_tag="int"),
+        Instruction("JZ", src1=0, imm=1, type_tag="bool"),
+        Instruction("PUSH", src1=0, type_tag="int"),
+        Instruction("POP", dst=0, type_tag="int"),
+        Instruction("CMP_EQ", dst=0, src1=1, src2=2, type_tag="bool"),
+    ],
+)
+def test_validate_program_rejects_type_tags_on_untagged_opcodes(instruction: Instruction) -> None:
+    with pytest.raises(ValidationError, match="type tag is not valid"):
+        validate_program([instruction, Instruction("HALT")], require_terminal_halt=instruction.opcode != "HALT")
 
 
 def test_validate_program_rejects_label_on_non_control_instruction() -> None:
