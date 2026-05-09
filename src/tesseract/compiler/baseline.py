@@ -22,7 +22,8 @@ class PromptVocabulary:
 
     @classmethod
     def from_tasks(cls, tasks: list[SyntheticTask]) -> PromptVocabulary:
-        tokens = sorted({token for task in tasks for token in task.prompt.split()})
+        special_tokens = {"<pad>", "<unk>"}
+        tokens = sorted({token for task in tasks for token in task.prompt.split()} - special_tokens)
         itos = ["<pad>", "<unk>", *tokens]
         stoi = {token: index for index, token in enumerate(itos)}
         return cls(stoi=stoi, itos=itos)

@@ -10,8 +10,10 @@ import torch
 
 from tesseract.compiler import (
     AutoregressiveCompiler,
+    PromptVocabulary,
     ProgramTokenizer,
     SyntheticTask,
+    TrainingBatch,
     build_training_batch,
     build_vocabularies,
     evaluate_compiler,
@@ -95,6 +97,55 @@ def test_training_step_is_seed_reproducible() -> None:
     assert first_predictions == second_predictions
 
 
+def test_training_step_rejects_malformed_batches() -> None:
+    tasks = generate_synthetic_tasks(task_types=("arithmetic",), operations=("add",), values=(0,))
+    artifacts = build_vocabularies(tasks)
+    batch = build_training_batch(
+        tasks,
+        prompt_vocab=artifacts.prompt_vocab,
+        program_tokenizer=artifacts.program_tokenizer,
+    )
+
+    with pytest.raises(ValueError, match="encoded_prompts"):
+        train_step(
+            artifacts.compiler.model,
+            TrainingBatch(tasks=tasks, encoded_prompts=[], encoded_programs=batch.encoded_programs),
+        )
+    with pytest.raises(ValueError, match="encoded_programs"):
+        train_step(
+            artifacts.compiler.model,
+            TrainingBatch(tasks=tasks, encoded_prompts=batch.encoded_prompts, encoded_programs=[]),
+        )
+    with pytest.raises(ValueError, match="conditioning_vectors"):
+        train_step(
+            artifacts.compiler.model,
+            TrainingBatch(
+                tasks=tasks,
+                encoded_prompts=batch.encoded_prompts,
+                encoded_programs=batch.encoded_programs,
+                conditioning_vectors=[],
+            ),
+        )
+    with pytest.raises(ValueError, match="encoded_prompts contains invalid token"):
+        train_step(
+            artifacts.compiler.model,
+            TrainingBatch(
+                tasks=tasks,
+                encoded_prompts=[[artifacts.prompt_vocab.size]],
+                encoded_programs=batch.encoded_programs,
+            ),
+        )
+    with pytest.raises(ValueError, match="encoded_programs contains invalid token"):
+        train_step(
+            artifacts.compiler.model,
+            TrainingBatch(
+                tasks=tasks,
+                encoded_prompts=batch.encoded_prompts,
+                encoded_programs=[[artifacts.program_vocab.size]],
+            ),
+        )
+
+
 @pytest.fixture(scope="module")
 def trained_compiler() -> tuple[AutoregressiveCompiler, list]:
     tasks = generate_synthetic_tasks(
@@ -172,6 +223,21 @@ def test_prompt_vocabulary_maps_unseen_tokens_to_unk() -> None:
     assert encoded[1] == artifacts.prompt_vocab.stoi["add"]
     assert encoded[2] == artifacts.prompt_vocab.unk_id
     assert encoded[3] == artifacts.prompt_vocab.unk_id
+
+
+def test_prompt_vocabulary_keeps_reserved_tokens_unique() -> None:
+    task = SyntheticTask(
+        prompt="<pad> arith <unk>",
+        expected_output=0,
+        gold_program=(Instruction("HALT"),),
+    )
+
+    vocabulary = PromptVocabulary.from_tasks([task])
+
+    assert vocabulary.itos[:2] == ["<pad>", "<unk>"]
+    assert len(vocabulary.itos) == len(set(vocabulary.itos))
+    assert vocabulary.pad_id == 0
+    assert vocabulary.unk_id == 1
 
 
 def test_program_tokenizer_round_trip() -> None:

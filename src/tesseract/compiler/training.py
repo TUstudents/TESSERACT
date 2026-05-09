@@ -82,12 +82,15 @@ def train_step(
     *,
     epochs: int = 256,
 ) -> dict[str, float]:
+    _validate_training_batch(model, batch)
     if not batch.tasks:
         return {"loss": 0.0, "sequence_error_rate": 0.0}
 
     feature_batches: list[torch.Tensor] = []
     target_batches: list[torch.Tensor] = []
-    conditioning_vectors = batch.conditioning_vectors or ([[]] * len(batch.tasks))
+    conditioning_vectors = (
+        batch.conditioning_vectors if batch.conditioning_vectors is not None else ([[]] * len(batch.tasks))
+    )
     for task, gold_tokens, conditioning in zip(batch.tasks, batch.encoded_programs, conditioning_vectors, strict=True):
         features, targets = model.encode_training_examples(task.prompt, gold_tokens, conditioning)
         feature_batches.append(features)
@@ -121,6 +124,35 @@ def train_step(
         "loss": final_loss,
         "sequence_error_rate": incorrect_sequences / total_examples if total_examples else 0.0,
     }
+
+
+def _validate_training_batch(model: AutoregressiveCompilerModel, batch: TrainingBatch) -> None:
+    task_count = len(batch.tasks)
+    if len(batch.encoded_prompts) != task_count:
+        raise ValueError("encoded_prompts must align one-to-one with tasks")
+    if len(batch.encoded_programs) != task_count:
+        raise ValueError("encoded_programs must align one-to-one with tasks")
+    if batch.conditioning_vectors is not None and len(batch.conditioning_vectors) != task_count:
+        raise ValueError("conditioning_vectors must align one-to-one with tasks")
+
+    invalid_prompt_ids = [
+        token_id
+        for encoded_prompt in batch.encoded_prompts
+        for token_id in encoded_prompt
+        if token_id < 0 or token_id >= model.prompt_vocab.size
+    ]
+    if invalid_prompt_ids:
+        raise ValueError(f"encoded_prompts contains invalid token id(s): {invalid_prompt_ids!r}")
+
+    program_vocab_size = model.vocabulary_size
+    invalid_program_ids = [
+        token_id
+        for encoded_program in batch.encoded_programs
+        for token_id in encoded_program
+        if token_id < 0 or token_id >= program_vocab_size
+    ]
+    if invalid_program_ids:
+        raise ValueError(f"encoded_programs contains invalid token id(s): {invalid_program_ids!r}")
 
 
 def evaluate_compiler(
