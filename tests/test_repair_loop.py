@@ -21,6 +21,7 @@ from tesseract.critic import (
     build_repair_training_examples,
     evaluate_model_driven_repair,
     evaluate_repair_loop,
+    generate_corrupted_programs,
     run_repair_benchmark,
 )
 from tesseract.critic.loop import build_repair_context
@@ -245,6 +246,29 @@ def test_model_driven_repair_compiler_rejects_empty_training_examples() -> None:
         build_model_driven_repair_compiler(cast(BackboneConditionedCompiler, object()), ())
 
 
+def test_generate_corrupted_programs_supports_harder_repair_failures() -> None:
+    max_task = generate_nl_tasks(task_types=("max",), values=(1, 2), seed=0)[0]
+    memory_task = generate_nl_tasks(task_types=("memory_sum",), values=(1, 2), seed=0)[0]
+
+    max_corruptions = generate_corrupted_programs(
+        max_task.gold_program,
+        corruption_names=("flip_branch_condition", "drop_instruction"),
+    )
+    memory_corruptions = generate_corrupted_programs(
+        memory_task.gold_program,
+        corruption_names=("shift_memory_offset",),
+    )
+
+    assert [corruption.name for corruption in max_corruptions] == [
+        "flip_branch_condition",
+        "drop_instruction",
+    ]
+    assert memory_corruptions[0].name == "shift_memory_offset"
+    assert all(corruption.program != max_task.gold_program for corruption in max_corruptions)
+    assert memory_corruptions[0].program != memory_task.gold_program
+    assert any(instruction.opcode == "JLT" for instruction in max_corruptions[0].program)
+
+
 def test_model_driven_repair_improves_held_out_failures() -> None:
     base_compiler = _build_trained_nl_compiler()
     train_tasks = generate_nl_tasks(
@@ -263,7 +287,9 @@ def test_model_driven_repair_improves_held_out_failures() -> None:
     fit_metrics = evaluate_model_driven_repair(repair_compiler, examples)
 
     assert metrics["canonical_accuracy"] == pytest.approx(1.0)
+    assert metrics["program_accuracy"] == pytest.approx(1.0)
     assert fit_metrics.canonical_accuracy == pytest.approx(1.0)
+    assert fit_metrics.program_accuracy == pytest.approx(1.0)
     assert report.baseline_success_rate == pytest.approx(0.0)
     assert report.repaired_success_rate > report.baseline_success_rate
     assert report.metrics.success_after_2_rounds >= report.repaired_success_rate

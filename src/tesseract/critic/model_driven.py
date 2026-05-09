@@ -31,6 +31,7 @@ class RepairTrainingExample:
 @dataclass(frozen=True)
 class LearnedRepairMetrics:
     canonical_accuracy: float
+    program_accuracy: float
 
 
 @dataclass(frozen=True)
@@ -228,7 +229,11 @@ class ModelDrivenRepairCompiler(RepairCapableCompiler):
             self.delegate.compiler.model.cache_sequence(example.target_canonical_prompt, gold_tokens, conditioning)
 
         metrics = evaluate_model_driven_repair(self, examples)
-        return {"loss": final_loss, "canonical_accuracy": metrics.canonical_accuracy}
+        return {
+            "loss": final_loss,
+            "canonical_accuracy": metrics.canonical_accuracy,
+            "program_accuracy": metrics.program_accuracy,
+        }
 
     def compile_with_backbone_output(
         self,
@@ -323,13 +328,31 @@ def evaluate_model_driven_repair(
     examples: Sequence[RepairTrainingExample],
 ) -> LearnedRepairMetrics:
     if not examples:
-        return LearnedRepairMetrics(canonical_accuracy=0.0)
-    correct = 0
+        return LearnedRepairMetrics(canonical_accuracy=0.0, program_accuracy=0.0)
+    correct_canonical = 0
+    correct_program = 0
     for example in examples:
         predicted = compiler.repair_model.predict_canonical_prompt(example.prompt, example.repair_state)
         if predicted == example.target_canonical_prompt:
-            correct += 1
-    return LearnedRepairMetrics(canonical_accuracy=correct / len(examples))
+            correct_canonical += 1
+        program = _compile_repair_prediction(compiler, example.prompt, example.repair_state, predicted)
+        if program == example.gold_program:
+            correct_program += 1
+    total = len(examples)
+    return LearnedRepairMetrics(canonical_accuracy=correct_canonical / total, program_accuracy=correct_program / total)
+
+
+def _compile_repair_prediction(
+    compiler: ModelDrivenRepairCompiler,
+    prompt: str,
+    repair_state: RepairState,
+    predicted_canonical_prompt: str,
+) -> tuple[Instruction, ...]:
+    conditioning = compiler.repair_model.conditioning_vector(prompt, repair_state)
+    program = tuple(compiler.delegate.compiler.compile_conditioned(predicted_canonical_prompt, conditioning))
+    if not program:
+        program = tuple(compiler.delegate.compiler.compile(predicted_canonical_prompt))
+    return program
 
 
 def build_held_out_repair_benchmark(
@@ -462,6 +485,47 @@ def _corrupt_program(program: Sequence[Instruction], corruption_name: str) -> tu
                     src1=instruction.src1,
                     src2=instruction.src2,
                     imm=new_target,
+                    label=instruction.label,
+                    type_tag=instruction.type_tag,
+                )
+                return tuple(mutated)
+        return None
+
+    if corruption_name == "flip_branch_condition":
+        swaps = {"JZ": "JNZ", "JNZ": "JZ", "JLT": "JGT", "JGT": "JLT"}
+        for index, instruction in enumerate(program):
+            if instruction.opcode in swaps:
+                mutated = list(program)
+                mutated[index] = Instruction(
+                    swaps[instruction.opcode],
+                    dst=instruction.dst,
+                    src1=instruction.src1,
+                    src2=instruction.src2,
+                    imm=instruction.imm,
+                    label=instruction.label,
+                    type_tag=instruction.type_tag,
+                )
+                return tuple(mutated)
+        return None
+
+    if corruption_name == "drop_instruction":
+        for index, instruction in enumerate(program):
+            if instruction.opcode != "HALT":
+                mutated = list(program)
+                del mutated[index]
+                return tuple(mutated)
+        return None
+
+    if corruption_name == "shift_memory_offset":
+        for index, instruction in enumerate(program):
+            if instruction.opcode in {"LOAD", "STORE"} and type(instruction.imm) is int:
+                mutated = list(program)
+                mutated[index] = Instruction(
+                    instruction.opcode,
+                    dst=instruction.dst,
+                    src1=instruction.src1,
+                    src2=instruction.src2,
+                    imm=int(instruction.imm) + 1,
                     label=instruction.label,
                     type_tag=instruction.type_tag,
                 )
