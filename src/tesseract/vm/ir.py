@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-VMImmediate = int | bool
+VMImmediate = int | bool | float
 
 VALID_OPCODES: Final[frozenset[str]] = frozenset(
     {
@@ -42,6 +42,9 @@ VALID_TYPE_TAGS: Final[frozenset[str]] = frozenset(
         "i32",
         "i64",
         "checked_i32",
+        "checked_i64",
+        "f32",
+        "addr",
     }
 )
 

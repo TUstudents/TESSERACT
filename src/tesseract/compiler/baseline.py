@@ -135,7 +135,7 @@ class ProgramTokenizer:
         tokens = [self._token_from_id(token_id) for token_id in token_ids]
         if not tokens or tokens[0] != self.vocabulary.bos_token:
             raise ValidationError("decoded sequence must start with <bos>")
-        current_fields: dict[str, int | bool | str | None] = {
+        current_fields: dict[str, int | bool | float | str | None] = {
             "dst": None,
             "src1": None,
             "src2": None,
@@ -200,7 +200,7 @@ class ProgramTokenizer:
     def _build_instruction(
         self,
         opcode: str,
-        current_fields: dict[str, int | bool | str | None],
+        current_fields: dict[str, int | bool | float | str | None],
     ) -> Instruction:
         try:
             return Instruction(
@@ -215,7 +215,7 @@ class ProgramTokenizer:
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
 
-    def _parse_value(self, raw_value: str) -> int | bool | str:
+    def _parse_value(self, raw_value: str) -> int | bool | float | str:
         if raw_value == "true":
             return True
         if raw_value == "false":
@@ -223,23 +223,26 @@ class ProgramTokenizer:
         try:
             return int(raw_value)
         except ValueError:
-            return raw_value
+            try:
+                return float(raw_value)
+            except ValueError:
+                return raw_value
 
-    def _coerce_optional_int(self, value: int | bool | str | None) -> int | None:
+    def _coerce_optional_int(self, value: int | bool | float | str | None) -> int | None:
         if value is None:
             return None
-        if isinstance(value, bool) or not isinstance(value, int):
+        if isinstance(value, bool) or isinstance(value, float) or not isinstance(value, int):
             raise ValidationError("expected integer operand during decode")
         return value
 
-    def _coerce_optional_immediate(self, value: int | bool | str | None) -> int | bool | None:
+    def _coerce_optional_immediate(self, value: int | bool | float | str | None) -> int | bool | float | None:
         if value is None:
             return None
         if isinstance(value, str):
             raise ValidationError("unexpected string immediate during decode")
         return value
 
-    def _coerce_optional_str(self, value: int | bool | str | None) -> str | None:
+    def _coerce_optional_str(self, value: int | bool | float | str | None) -> str | None:
         if value is None:
             return None
         if not isinstance(value, str):

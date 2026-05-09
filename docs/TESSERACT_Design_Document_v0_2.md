@@ -1,4 +1,4 @@
-# TESSERACT: A Compiler–Executor Language Model
+# TESSERACT: A Typed Execution Coprocessor for Exact Language-Model Computation
 ## Complete Design Proposal and Implementation Plan
 
 **Version:** 0.2  
@@ -9,7 +9,7 @@
 
 ## Abstract
 
-TESSERACT (**T**yped **E**xecutor with **S**emantic **S**tate, **E**xact **R**AM, **A**nd **C**ompiler-**T**) is a bimodal language-model architecture that separates continuous semantic reasoning from exact symbolic execution. Instead of forcing attention to simulate a computer directly, TESSERACT learns to compile tasks into an internal typed intermediate representation (IR), executes that IR on an exact virtual machine (VM) with persistent memory and explicit control flow, and uses a trace critic to diagnose failures and guide repair. The central design thesis is that exactness should live in the VM semantics, while learning should live in the compiler, semantic backbone, and critic. This document presents the revised full proposal, formal model, subsystem theory, implementation plan, training strategy, milestones, resource estimates, risks, and review criteria.
+TESSERACT (**T**yped **E**xecutor with **S**emantic **S**tate, **E**xact **R**AM, **A**nd **C**ompiler-**T**) is a typed execution coprocessor for exact language-model computation. Instead of forcing attention to simulate a computer directly, TESSERACT asks the language-model side to compile intent into a typed intermediate representation (IR), then hands that IR to an exact deterministic virtual machine (VM) with persistent memory, explicit control flow, traps, traces, and replay. The central design thesis is that exactness should live behind a stable VM interface, while learning should live in the semantic backbone, compiler, critic, and repair policy that decide what to dispatch to that interface. This document presents the revised full proposal, formal model, subsystem theory, implementation plan, training strategy, milestones, resource estimates, risks, and review criteria.
 
 ---
 
@@ -39,7 +39,7 @@ TESSERACT (**T**yped **E**xecutor with **S**emantic **S**tate, **E**xact **R**AM
 
 ### 1.1 Problem statement
 
-A practical Turing-complete LLM must solve three problems simultaneously:
+A practical language-model system with reliable exact-computation capability must solve three problems simultaneously:
 
 1. **Exact state evolution**: symbolic state must update by formal rules, not approximate hidden-state drift.
 2. **Trainable credit assignment**: the model must learn which computation to run and how to repair failures.
@@ -57,7 +57,7 @@ Tool-use systems preserve meaningful **interface-level state visibility**: the m
 - **latent-space continuity** across internal machine states,
 - **direct access to intermediate executable state** during learning.
 
-TESSERACT is aimed at an internal executable state substrate rather than external orchestration alone.
+TESSERACT is aimed at a stable typed execution substrate rather than external orchestration alone: a coprocessor-like boundary where model-generated programs are validated, executed, traced, and repaired through explicit machine semantics.
 
 ### 1.3 Thesis
 
@@ -67,9 +67,9 @@ The right question is not:
 
 The right question is:
 
-> Can a language model learn to compile tasks into an internal exact machine that is efficient, verifiable, and repairable?
+> Can a language model learn to dispatch exact subcomputations to a typed deterministic execution coprocessor that is efficient, verifiable, and repairable?
 
-TESSERACT answers that question architecturally.
+TESSERACT answers that question architecturally: the neural model remains probabilistic at the interface, while accepted VM programs execute exactly.
 
 ---
 
@@ -89,6 +89,8 @@ This yields a clean division:
 - the **VM** executes it exactly,
 - the **critic** diagnoses failures and guides repair.
 
+The VM boundary is the coprocessor contract. Model-side components may be uncertain, learned, or repair-conditioned, but the dispatch format, validation rules, state transition semantics, trap behavior, and trace artifacts are deterministic.
+
 ### 2.2 Why this is different from retrieval-based exactness
 
 Retrieval-centric architectures treat computation as selecting the right previous state. That is insufficient because computation also requires:
@@ -99,13 +101,13 @@ Retrieval-centric architectures treat computation as selecting the right previou
 - typed arithmetic,
 - failure localization.
 
-TESSERACT is therefore a **compiler–executor architecture**, not a better retrieval trick.
+TESSERACT is therefore a **typed execution-coprocessor architecture**, not a better retrieval trick.
 
 ---
 
 ## 3. System overview
 
-The system has four main modules.
+The system has four main modules. Together they define a coprocessor protocol: typed program in, deterministic execution/trace/trap out, structured feedback back to the compiler.
 
 ### Module A — Semantic Backbone
 
@@ -1096,4 +1098,4 @@ K^\star \approx \sqrt{\frac{m|S|}{Q}}.
 
 ## Closing summary
 
-TESSERACT is not a proposal to make attention itself into an exact computer. It is a proposal to let a language model compile problems into a small exact computer, inspect execution traces, and repair its own symbolic programs. The core architectural bet is that this separation of semantic reasoning and exact execution is the missing step toward a practical Turing-complete LLM.
+TESSERACT is not a proposal to make attention itself into an exact computer. It is a proposal to give a language model a typed deterministic execution coprocessor: the model compiles intent into IR, the VM executes exactly, and trace-aware repair improves the next dispatch. The core architectural bet is that exact computation should be delegated across a stable typed boundary rather than approximated inside the model's hidden state.

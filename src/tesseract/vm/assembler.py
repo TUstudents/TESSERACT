@@ -92,7 +92,7 @@ def _parse_instruction_line(line: str) -> Instruction:
     dst: int | None = None
     src1: int | None = None
     src2: int | None = None
-    imm: int | bool | None = None
+    imm: int | bool | float | None = None
     label: str | None = None
     type_tag: str | None = None
     seen_operands: set[str] = set()
@@ -129,7 +129,7 @@ def _parse_int_operand(name: str, raw_value: str) -> int:
         raise ValidationError(f"invalid integer operand {name!r}: {raw_value!r}") from exc
 
 
-def _parse_immediate(raw_value: str) -> int | bool:
+def _parse_immediate(raw_value: str) -> int | bool | float:
     lowered = raw_value.lower()
     if lowered == "true":
         return True
@@ -137,11 +137,14 @@ def _parse_immediate(raw_value: str) -> int | bool:
         return False
     try:
         return int(raw_value)
-    except ValueError as exc:
-        raise ValidationError(f"invalid immediate {raw_value!r}") from exc
+    except ValueError:
+        try:
+            return float(raw_value)
+        except ValueError as exc:
+            raise ValidationError(f"invalid immediate {raw_value!r}") from exc
 
 
-def _format_value(value: int | bool) -> str:
+def _format_value(value: int | bool | float) -> str:
     if isinstance(value, bool):
         return str(value).lower()
     return str(value)

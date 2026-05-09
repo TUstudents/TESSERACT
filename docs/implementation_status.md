@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document records what has actually been implemented in the repository so far, how it maps to the design documents, and what remains next.
+This document records what has actually been implemented in the repository so far, how it maps to the design documents, and what remains next under the current framing: **TESSERACT is a typed execution coprocessor for exact language-model computation**.
 
 Related documents:
 
@@ -24,15 +24,17 @@ The repository has completed the full prototype roadmap currently tracked in the
 - Phase 6 — iterative repair loop
 - Phase 7 — performance, reproducibility, and evaluation hardening
 
-At this point, TESSERACT is no longer only a scaffold. It now contains a tested Python reference VM, a typed instruction representation, static program validation, an assembler/disassembler, JSON serialization for key VM artifacts, deterministic replay support, a synthetic compiler stack with a small neural autoregressive decoder and a retained count-based comparison baseline, a differential critic scaffold, both rule-based and learned NL backbone paths, expanded task coverage across arithmetic/control-flow/loop/memory families, a deterministic repair loop controller, and a reproducible benchmark/reporting layer.
+At this point, TESSERACT is no longer only a scaffold. It now contains the core pieces of a deterministic execution coprocessor substrate: a tested Python reference VM, a typed instruction representation, static program validation, an assembler/disassembler, JSON serialization for key VM artifacts, deterministic replay support, a synthetic compiler stack with a small neural autoregressive decoder and a retained count-based comparison baseline, differential and learned critic paths, both rule-based and learned NL backbone paths, expanded task coverage across arithmetic/control-flow/loop/memory families, a deterministic controller paired with model-driven repair compilation, and a reproducible research-oriented benchmark/reporting layer.
 
-The current neural compiler should still be understood as a small prototype decoder rather than a strong research-grade compiler architecture. It is sufficient for sequence modeling, checkpointing, validation, repair-loop wiring, and evaluation plumbing, but broader task scope and stronger learned conditioning remain future work.
+The current model boundary should be read as a prototype coprocessor interface: the learned or rule-based frontend proposes typed IR, the VM accepts only validated programs, and execution produces exact outputs, traps, traces, and repair signals. The central research gap is now dispatch reliability and breadth, not whether the deterministic executor can run accepted programs.
+
+The current neural compiler should still be understood as a small prototype decoder rather than a strong research-grade dispatch compiler. It is sufficient for sequence modeling, checkpointing, validation, repair-loop wiring, and evaluation plumbing, but broader task scope and stronger learned conditioning remain future work.
 
 The remaining major architecture pieces are now mostly depth and learning-quality gaps rather than missing subsystem stubs:
 
 - stronger learned backbone implementations beyond the current small prototype
 - stronger learned compiler architectures beyond the current baseline
-- learned repair policies and critic models
+- stronger learned repair/critic policies beyond the current small prototypes
 - broader benchmark/task coverage and performance optimization
 
 ---
@@ -116,6 +118,9 @@ Current type tags:
 - `i32`
 - `i64`
 - `checked_i32`
+- `checked_i64`
+- `f32`
+- `addr`
 
 ### 3. VM state model
 
@@ -180,9 +185,12 @@ Current trap support:
 Current arithmetic policy:
 
 - default integer behavior for `int`/`i64`
-- division truncates toward zero
+- division truncates toward zero for integer division
 - wrapping semantics for `i32`
 - checked overflow trap for `checked_i32`
+- checked overflow trap for `checked_i64`
+- `f32` arithmetic with float immediates and float load/store support
+- prototype address discipline via `addr`-typed registers for memory-base validation
 - boolean typing for logical operations
 
 Current initialization policy:
@@ -306,7 +314,7 @@ Current repair-loop support includes:
 - max-round termination
 - repair-loop aggregate metrics
 
-The current repair path is deterministic scaffold logic around the existing compiler/critic stack, not yet a learned repair policy.
+The current repair path now includes a learned repair model that predicts repair-conditioned recompilations from compact critic state while preserving deterministic controller termination and oscillation semantics.
 
 ### 11. Reproducibility and benchmarking helpers
 
@@ -319,16 +327,18 @@ Implemented in:
 Current evaluation hardening support includes:
 
 - global seed control
-- fixed NL benchmark suite generation
-- machine-readable benchmark reports
-- human-readable benchmark summaries
+- fixed benchmark-suite generation for exact execution, anti-shortcut checks, and macro-step-focused tasks
+- machine-readable benchmark reports and experiment manifests
+- human-readable benchmark and research-evaluation summaries
 - execution-backed benchmark metrics for NL tasks
+- critic-localization and repair-improvement benchmarking helpers
+- compile/execute failure breakdowns, trace-length summaries, and timing summaries
 
 ---
 
 ## Test Status
 
-Current test coverage spans the VM, VM tooling, compiler baseline, NL backbone path, repair loop scaffold, evaluation helpers, and package import paths.
+Current test coverage spans the VM, VM tooling, compiler baseline, NL backbone path, learned critic and model-driven repair paths, richer evaluation helpers, and package import paths.
 
 Key test files:
 
@@ -409,11 +419,14 @@ Implemented baseline pieces:
 - invariant instrumentation layer
 - repair-prompt scaffolding
 - deterministic repair-loop controller integration
+- oracle-derived critic training-example generation from gold/corrupted programs
+- small learned critic prototype with failure-type and first-failing-step heads
+- learned-critic evaluation harness against oracle labels
 
 Still missing:
 
-- learned failure classifiers
-- critic training loop
+- stronger learned failure classifiers beyond the current small prototype
+- deeper learned critic integration into repair-time decision-making
 - richer trace summarization and compression
 
 ### Natural-language path
@@ -481,7 +494,7 @@ The implementation now reflects the design doc in these areas:
 
 These are present as early prototypes but not yet at full design depth:
 
-- type system
+- type system, now including `f32`, `checked_i64`, and prototype `addr` tagging
 - trace schema sophistication
 - compile-time validation strength
 - assembler/disassembler ergonomics
@@ -492,7 +505,7 @@ These remain future work:
 
 - stronger learned semantic backbone models beyond the current small prototype
 - stronger learned compiler architectures beyond the current small prototype decoder
-- learned critic and repair policies
+- stronger learned critic and repair policies beyond the current prototypes
 - richer IR/value coverage and broader language-grounded task families beyond the current algorithmic set
 
 ---
@@ -501,15 +514,15 @@ These remain future work:
 
 The next recommended milestone is not a new missing subsystem, but a quality upgrade of the learned components already scaffolded.
 
-### Suggested follow-on focus — IR/value-system strengthening
+### Suggested follow-on focus — Stronger learned quality
 
 Recommended implementation order:
 
-1. extend type/value semantics carefully while preserving current determinism
-2. update validation, serialization, replay, and tests in lockstep with any new opcode or type
-3. keep the current benchmark harness fixed while adding richer executor capabilities
-4. after that, push learned critic and repair upgrades
-5. finally deepen research-grade evaluation and profiling
+1. strengthen the learned repair model beyond the current small prompt-plus-state classifier
+2. deepen critic-to-repair integration and richer repair-context compression
+3. replace current small learned critic/backbone/compiler prototypes with stronger architectures
+4. expand task families toward richer language/sequence problems
+5. deepen profiling and larger-scale experiment automation
 
 This keeps development aligned with the design principle of stabilizing exact execution and observable diagnostics before scaling the learned stack.
 
@@ -530,9 +543,9 @@ In practical terms, the repository currently provides:
 - a small neural autoregressive compiler plus a retained count-based comparison baseline
 - compiler checkpointing and execution-backed compiler evaluation
 - rule-based and learned NL backbone paths plus NL task datasets
-- a differential critic scaffold with invariants and repair-prompt support
-- a deterministic repair-loop controller
-- reproducibility and benchmark/report helpers
+- differential and learned critic paths with oracle-derived critic supervision
+- model-driven repair compilation with held-out repair benchmarking
+- reproducibility, experiment-manifest, anti-shortcut, and macro-step benchmark/report helpers
 - working development and CI tooling
 
-The project is ready to move from scaffolding-complete prototyping into strengthening IR/value semantics and improving critic/repair learning quality.
+The project is ready to move from plumbing-complete prototyping into improving the strength, scale, and research depth of the learned components.

@@ -4,16 +4,21 @@ from typing import Any, cast
 
 import pytest
 
+from tesseract.compiler.synthetic import make_max_task, make_sum_to_n_task, make_synthetic_task
 from tesseract.critic import (
     DifferentialCritic,
     FinalMemoryInvariant,
     FinalRegisterInvariant,
     Invariant,
+    LearnedCritic,
     MaxStepsInvariant,
     NoTrapInvariant,
     TraceStepInvariant,
+    build_critic_training_examples,
+    build_learned_critic,
     build_repair_prompt,
     evaluate_invariants,
+    evaluate_learned_critic,
     summarize_trace,
 )
 from tesseract.vm import Instruction, VM, VMState, assemble
@@ -279,3 +284,90 @@ def test_differential_critic_prioritizes_trap_halt_reason_for_trace_less_states(
     assert report.status == "failure"
     assert report.first_failing_step is None
     assert report.failure_type == "TIMEOUT"
+
+
+def test_build_critic_training_examples_is_deterministic_and_mixed() -> None:
+    tasks = [
+        make_synthetic_task("add", 2, 3),
+        make_max_task(3, 1),
+        make_sum_to_n_task(3),
+    ]
+
+    first = build_critic_training_examples(tasks)
+    second = build_critic_training_examples(tasks)
+
+    assert first == second
+    assert any(example.failure_type == "SUCCESS" for example in first)
+    assert any(example.failure_type != "SUCCESS" for example in first)
+
+
+@pytest.fixture(scope="module")
+def trained_learned_critic() -> tuple[LearnedCritic, list]:
+    tasks = [
+        make_synthetic_task("add", 2, 3),
+        make_synthetic_task("sub", 5, 1),
+        make_max_task(3, 1),
+        make_sum_to_n_task(3),
+    ]
+    examples = build_critic_training_examples(tasks)
+    critic = build_learned_critic()
+    metrics = critic.fit(examples, epochs=256)
+
+    assert metrics["failure_type_accuracy"] == pytest.approx(1.0)
+    assert metrics["first_step_accuracy"] == pytest.approx(1.0)
+    return critic, examples
+
+
+def test_learned_critic_matches_oracle_labels_on_training_examples(
+    trained_learned_critic: tuple[LearnedCritic, list],
+) -> None:
+    critic, examples = trained_learned_critic
+
+    metrics = evaluate_learned_critic(critic, examples)
+
+    assert metrics.failure_type_accuracy == pytest.approx(1.0)
+    assert metrics.first_step_accuracy == pytest.approx(1.0)
+
+
+def test_learned_critic_compare_returns_schema_compatible_report(
+    trained_learned_critic: tuple[LearnedCritic, list],
+) -> None:
+    critic, examples = trained_learned_critic
+    example = next(example for example in examples if example.failure_type != "SUCCESS")
+    oracle_report = example.oracle_report
+
+    report = critic.compare(
+        VMState(
+            registers=dict(oracle_report.candidate_summary.final_registers),
+            memory=dict(oracle_report.candidate_summary.final_memory),
+            halted=oracle_report.candidate_summary.halt_reason == "HALT",
+            halt_reason=oracle_report.candidate_summary.halt_reason,
+            step_count=oracle_report.candidate_summary.step_count,
+            pc=oracle_report.candidate_summary.final_pc,
+        ),
+        VMState(
+            registers=dict(oracle_report.expected_summary.final_registers) if oracle_report.expected_summary is not None else {},
+            memory=dict(oracle_report.expected_summary.final_memory) if oracle_report.expected_summary is not None else {},
+            halted=(oracle_report.expected_summary.halt_reason == "HALT") if oracle_report.expected_summary is not None else False,
+            halt_reason=oracle_report.expected_summary.halt_reason if oracle_report.expected_summary is not None else None,
+            step_count=oracle_report.expected_summary.step_count if oracle_report.expected_summary is not None else 0,
+            pc=oracle_report.expected_summary.final_pc if oracle_report.expected_summary is not None else 0,
+        ),
+        task_prompt=example.task_prompt,
+    )
+
+    assert report.failure_type in {
+        "SUCCESS",
+        "WRONG_BRANCH",
+        "WRONG_REGISTER",
+        "WRONG_ADDRESS",
+        "WRONG_VALUE",
+        "TYPE_ERROR",
+        "TIMEOUT",
+        "INVALID_OP",
+        "INVARIANT_VIOLATION",
+        "UNKNOWN_FAILURE",
+    }
+    assert report.status in {"success", "failure"}
+    assert report.message
+    assert report.repair_prompt is not None

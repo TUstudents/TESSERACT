@@ -123,6 +123,19 @@ def test_assemble_rejects_invalid_immediate() -> None:
         assemble(["CONST dst=0 imm=not_an_int", "HALT"])
 
 
+def test_assemble_and_disassemble_support_float_immediates() -> None:
+    source = [
+        "CONST dst=0 imm=1.5 type_tag=f32",
+        "HALT",
+    ]
+
+    program = assemble(source)
+    text = disassemble(program)
+
+    assert program[0].imm == 1.5
+    assert text == source
+
+
 def test_validate_program_type_checks_bool_add() -> None:
     program = [
         Instruction("CONST", dst=0, imm=True, type_tag="bool"),
@@ -140,6 +153,11 @@ def test_validate_program_rejects_boolean_immediate_without_bool_tag() -> None:
         validate_program([Instruction("CONST", dst=0, imm=True), Instruction("HALT")])
 
 
+def test_validate_program_rejects_float_immediate_without_f32_tag() -> None:
+    with pytest.raises(ValidationError, match="float immediate requires f32 type tag"):
+        validate_program([Instruction("CONST", dst=0, imm=1.5), Instruction("HALT")])
+
+
 @pytest.mark.parametrize("opcode", ["LOAD", "STORE"])
 def test_validate_program_rejects_boolean_memory_offset(opcode: str) -> None:
     if opcode == "LOAD":
@@ -148,6 +166,34 @@ def test_validate_program_rejects_boolean_memory_offset(opcode: str) -> None:
         program = [Instruction(opcode, src1=0, src2=1, imm=True), Instruction("HALT")]
 
     with pytest.raises(ValidationError, match="offset must be an integer"):
+        validate_program(program)
+
+
+def test_validate_program_accepts_addr_base_and_f32_memory_values() -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=8, type_tag="addr"),
+        Instruction("CONST", dst=1, imm=1.5, type_tag="f32"),
+        Instruction("STORE", src1=0, src2=1, type_tag="f32"),
+        Instruction("LOAD", dst=2, src1=0, type_tag="f32"),
+        Instruction("HALT"),
+    ]
+
+    result = validate_program(program)
+
+    assert result.register_types[0] == "addr"
+    assert result.register_types[1] == "f32"
+    assert result.register_types[2] == "f32"
+
+
+def test_validate_program_rejects_mixed_float_and_integer_arithmetic() -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=1.5, type_tag="f32"),
+        Instruction("CONST", dst=1, imm=2),
+        Instruction("ADD", dst=2, src1=0, src2=1, type_tag="f32"),
+        Instruction("HALT"),
+    ]
+
+    with pytest.raises(ValidationError, match="expected one of"):
         validate_program(program)
 
 
@@ -164,6 +210,20 @@ def test_validate_program_rejects_unexpected_operand_combination() -> None:
 def test_program_json_round_trip() -> None:
     program = [
         Instruction("CONST", dst=0, imm=5),
+        Instruction("HALT"),
+    ]
+
+    payload = program_to_json(program)
+    restored = program_from_json(payload)
+
+    assert restored == program
+
+
+def test_program_json_round_trip_preserves_f32_and_addr_tags() -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=10, type_tag="addr"),
+        Instruction("CONST", dst=1, imm=1.5, type_tag="f32"),
+        Instruction("STORE", src1=0, src2=1, type_tag="f32"),
         Instruction("HALT"),
     ]
 

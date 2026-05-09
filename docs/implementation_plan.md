@@ -2,18 +2,23 @@
 
 ## Purpose
 
-This document turns the architecture described in `docs/TESSERACT_Design_Document_v0_2.md` into a concrete, phased implementation roadmap for the current repository state.
+This document turns the architecture described in `docs/TESSERACT_Design_Document_v0_2.md` into a concrete, phased implementation roadmap. The current framing is: **TESSERACT is a typed execution coprocessor for exact language-model computation**.
+
+Historical note: this file is the original roadmap from the scaffold stage. For the current implementation snapshot, use `docs/implementation_status.md`; for the next post-prototype cycle, use `docs/next_steps_implementation_plan.md`.
 
 The guiding principle is:
 
 - keep exactness in the VM,
+- treat typed IR as the coprocessor boundary between model-side dispatch and deterministic execution,
 - keep learning in the compiler/backbone/critic,
 - add features only when they are testable,
 - test every feature as it lands.
 
 ---
 
-## Current Repository Assessment
+## Historical Repository Assessment
+
+This section records the repository state when the roadmap was first written. It is intentionally preserved as planning history and should not be read as the current project status.
 
 Reviewed files:
 
@@ -27,11 +32,11 @@ Reviewed files:
 - `src/tesseract/critic/interface.py`
 - `tests/test_vm.py`
 
-### Current implementation status
+### Initial implementation status
 
-The repository is a scaffold, not yet a functional prototype.
+At the time this roadmap was written, the repository was a scaffold, not yet a functional prototype.
 
-Implemented today:
+Implemented then:
 
 - a minimal `Instruction` dataclass,
 - a minimal `VMState`,
@@ -39,7 +44,7 @@ Implemented today:
 - protocol-only compiler and critic interfaces,
 - one VM unit test.
 
-### Current gaps relative to the design document
+### Initial gaps relative to the design document
 
 Missing major subsystems:
 
@@ -62,7 +67,7 @@ Missing major subsystems:
 
 ### Test findings
 
-Current test behavior:
+Initial test behavior:
 
 - `pytest -q` fails with `ModuleNotFoundError: tesseract`
 - `uv run pytest -q` fails with the same import error

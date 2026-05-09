@@ -5,7 +5,7 @@ from typing import Collection, Final, Literal, cast
 
 from .ir import Instruction, VALID_OPCODES, VALID_TYPE_TAGS
 
-RegisterType = Literal["bool", "int", "i32", "i64", "checked_i32"]
+RegisterType = Literal["bool", "int", "i32", "i64", "checked_i32", "checked_i64", "f32", "addr"]
 CONTROL_FLOW_OPCODES: Final[frozenset[str]] = frozenset({"JMP", "JZ", "JNZ", "JLT", "JGT", "CALL"})
 
 
@@ -26,7 +26,10 @@ class TypeCheckResult:
     register_types: dict[int, RegisterType]
 
 
-INT_TYPE_TAGS: Final[frozenset[RegisterType]] = frozenset({"int", "i32", "i64", "checked_i32"})
+INT_TYPE_TAGS: Final[frozenset[RegisterType]] = frozenset({"int", "i32", "i64", "checked_i32", "checked_i64"})
+FLOAT_TYPE_TAGS: Final[frozenset[RegisterType]] = frozenset({"f32"})
+ADDRESS_TYPE_TAGS: Final[frozenset[RegisterType]] = frozenset({"addr"})
+SCALAR_INT_TYPE_TAGS: Final[frozenset[RegisterType]] = frozenset(INT_TYPE_TAGS | ADDRESS_TYPE_TAGS)
 BOOL_TYPE_TAGS: Final[frozenset[RegisterType]] = frozenset({"bool"})
 
 
@@ -108,9 +111,13 @@ def _validate_instruction_shape(
             raise ValidationError("missing immediate operand", index=index)
         if isinstance(instruction.imm, bool) and instruction.type_tag != "bool":
             raise ValidationError("boolean immediate requires bool type tag", index=index)
+        if type(instruction.imm) is float and instruction.type_tag != "f32":
+            raise ValidationError("float immediate requires f32 type tag", index=index)
         if isinstance(instruction.imm, int) and not isinstance(instruction.imm, bool):
             return
         if isinstance(instruction.imm, bool):
+            return
+        if type(instruction.imm) is float:
             return
         raise ValidationError("unsupported immediate type", index=index)
 
@@ -212,7 +219,7 @@ def _update_type_environment(
         dst = require_register(instruction.dst, "dst")
         if isinstance(instruction.imm, bool):
             register_types[dst] = "bool"
-        elif instruction.type_tag in INT_TYPE_TAGS:
+        elif instruction.type_tag in SCALAR_INT_TYPE_TAGS | FLOAT_TYPE_TAGS:
             register_types[dst] = cast(RegisterType, instruction.type_tag)
         else:
             register_types[dst] = "int"
@@ -226,26 +233,42 @@ def _update_type_environment(
             if source_type is not None and source_type != "bool":
                 raise ValidationError("cannot move non-bool into bool destination", index=index)
             register_types[dst] = "bool"
-        elif instruction.type_tag in INT_TYPE_TAGS:
-            if source_type is not None and source_type == "bool":
-                raise ValidationError("cannot move bool into integer destination", index=index)
+        elif instruction.type_tag in SCALAR_INT_TYPE_TAGS | FLOAT_TYPE_TAGS:
+            if source_type is not None:
+                if instruction.type_tag == "f32" and source_type not in FLOAT_TYPE_TAGS:
+                    raise ValidationError("cannot move non-f32 into f32 destination", index=index)
+                if instruction.type_tag != "f32" and source_type in BOOL_TYPE_TAGS | FLOAT_TYPE_TAGS:
+                    raise ValidationError("cannot move non-integer scalar into integer-like destination", index=index)
             register_types[dst] = cast(RegisterType, instruction.type_tag)
         elif source_type is not None:
             register_types[dst] = source_type
         return
 
     if opcode in {"ADD", "SUB", "MUL", "DIV", "CMP_LT", "CMP_GT"}:
-        expect_type(instruction.src1, INT_TYPE_TAGS, "src1")
-        expect_type(instruction.src2, INT_TYPE_TAGS, "src2")
+        src1 = require_register(instruction.src1, "src1")
+        src2 = require_register(instruction.src2, "src2")
+        lhs = register_types.get(src1)
+        rhs = register_types.get(src2)
+        if instruction.type_tag == "f32":
+            expect_type(src1, FLOAT_TYPE_TAGS, "src1")
+            expect_type(src2, FLOAT_TYPE_TAGS, "src2")
+        else:
+            expect_type(src1, INT_TYPE_TAGS, "src1")
+            expect_type(src2, INT_TYPE_TAGS, "src2")
+        if lhs is not None and rhs is not None:
+            lhs_is_float = lhs in FLOAT_TYPE_TAGS
+            rhs_is_float = rhs in FLOAT_TYPE_TAGS
+            if lhs_is_float != rhs_is_float:
+                raise ValidationError("arithmetic operands must both be integer-like or both be f32", index=index)
         if instruction.dst is not None:
             if opcode in {"CMP_LT", "CMP_GT"}:
                 register_types[instruction.dst] = "bool"
+            elif instruction.type_tag in INT_TYPE_TAGS | FLOAT_TYPE_TAGS:
+                register_types[instruction.dst] = cast(RegisterType, instruction.type_tag)
+            elif lhs in FLOAT_TYPE_TAGS and rhs in FLOAT_TYPE_TAGS:
+                register_types[instruction.dst] = "f32"
             else:
-                register_types[instruction.dst] = (
-                    cast(RegisterType, instruction.type_tag)
-                    if instruction.type_tag in INT_TYPE_TAGS
-                    else "int"
-                )
+                register_types[instruction.dst] = "int"
         return
 
     if opcode in {"AND", "OR", "XOR", "NOT"}:
@@ -268,22 +291,24 @@ def _update_type_environment(
         return
 
     if opcode == "LOAD":
-        expect_type(instruction.src1, INT_TYPE_TAGS, "src1")
+        expect_type(instruction.src1, SCALAR_INT_TYPE_TAGS, "src1")
         dst = require_register(instruction.dst, "dst")
         if instruction.type_tag == "bool":
             register_types[dst] = "bool"
-        elif instruction.type_tag in INT_TYPE_TAGS:
+        elif instruction.type_tag in SCALAR_INT_TYPE_TAGS | FLOAT_TYPE_TAGS:
             register_types[dst] = cast(RegisterType, instruction.type_tag)
         return
 
     if opcode == "STORE":
-        expect_type(instruction.src1, INT_TYPE_TAGS, "src1")
+        expect_type(instruction.src1, SCALAR_INT_TYPE_TAGS, "src1")
         src2 = require_register(instruction.src2, "src2")
         source_type = register_types.get(src2)
         if instruction.type_tag == "bool" and source_type is not None and source_type != "bool":
-            raise ValidationError("STORE type tag bool conflicts with integer source", index=index)
-        if instruction.type_tag in INT_TYPE_TAGS and source_type == "bool":
-            raise ValidationError("STORE integer type tag conflicts with bool source", index=index)
+            raise ValidationError("STORE type tag bool conflicts with non-bool source", index=index)
+        if instruction.type_tag in INT_TYPE_TAGS | ADDRESS_TYPE_TAGS and source_type in BOOL_TYPE_TAGS | FLOAT_TYPE_TAGS:
+            raise ValidationError("STORE integer-like type tag conflicts with non-integer-like source", index=index)
+        if instruction.type_tag in FLOAT_TYPE_TAGS and source_type is not None and source_type not in FLOAT_TYPE_TAGS:
+            raise ValidationError("STORE f32 type tag conflicts with non-f32 source", index=index)
         return
 
     if opcode in {"PUSH", "POP", "JMP", "JLT", "JGT", "CALL", "RET", "HALT", "JZ", "JNZ"}:

@@ -89,12 +89,20 @@ class RepairLoopController:
         task: NaturalLanguageTask,
         compiler: RepairCapableCompiler,
     ) -> RepairLoopResult:
+        return self.run_with_initial_result(task, compiler, None)
+
+    def run_with_initial_result(
+        self,
+        task: NaturalLanguageTask,
+        compiler: RepairCapableCompiler,
+        initial_result: NaturalLanguageCompileResult | None,
+    ) -> RepairLoopResult:
         attempts: list[RepairAttempt] = []
         seen_programs: set[tuple[Instruction, ...]] = set()
 
         for round_index in range(self.max_rounds):
             if round_index == 0:
-                compile_result = compiler.compile_with_backbone_output(task.prompt)
+                compile_result = initial_result if initial_result is not None else compiler.compile_with_backbone_output(task.prompt)
             else:
                 previous_context = attempts[-1].repair_context
                 previous_report = attempts[-1].critic_report if previous_context is None else previous_context.critic_report

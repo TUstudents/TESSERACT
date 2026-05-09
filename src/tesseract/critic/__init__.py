@@ -2,7 +2,35 @@
 
 from .differential import DifferentialCritic, ProgramExecution
 from .interface import Critic, CriticInput
+from .learned import (
+    CriticFeatureExtractor,
+    CriticTrainingExample,
+    LearnedCritic,
+    LearnedCriticMetrics,
+    LearnedCriticModel,
+    LearnedCriticPrediction,
+    build_critic_training_examples,
+    build_learned_critic,
+    evaluate_learned_critic,
+)
 from .loop import RepairAttempt, RepairContext, RepairLoopController, RepairLoopMetrics, RepairLoopResult, evaluate_repair_loop
+from .model_driven import (
+    CorruptedProgramSpec,
+    LearnedRepairMetrics,
+    LearnedRepairModel,
+    ModelDrivenRepairCompiler,
+    RepairBenchmarkCase,
+    RepairBenchmarkReport,
+    RepairTargetVocabulary,
+    RepairTrainingExample,
+    RepairVocabulary,
+    build_held_out_repair_benchmark,
+    build_model_driven_repair_compiler,
+    build_repair_training_examples,
+    evaluate_model_driven_repair,
+    generate_corrupted_programs,
+    run_repair_benchmark,
+)
 from .invariants import (
     FinalMemoryInvariant,
     FinalRegisterInvariant,
@@ -12,7 +40,7 @@ from .invariants import (
     TraceStepInvariant,
     evaluate_invariants,
 )
-from .repair import build_repair_prompt
+from .repair import RepairState, build_repair_prompt, build_repair_state, repair_state_feature_dim
 from .schema import CriticReport, FailureType, InvariantViolation, TraceStatus, TraceSummary, summarize_trace
 
 __all__ = [
@@ -31,13 +59,40 @@ __all__ = [
     "MaxStepsInvariant",
     "TraceStepInvariant",
     "evaluate_invariants",
+    "RepairState",
+    "build_repair_state",
+    "repair_state_feature_dim",
     "build_repair_prompt",
     "ProgramExecution",
     "DifferentialCritic",
+    "CriticFeatureExtractor",
+    "CriticTrainingExample",
+    "LearnedCriticPrediction",
+    "LearnedCriticMetrics",
+    "LearnedCriticModel",
+    "LearnedCritic",
+    "build_critic_training_examples",
+    "build_learned_critic",
+    "evaluate_learned_critic",
     "RepairContext",
     "RepairAttempt",
     "RepairLoopResult",
     "RepairLoopMetrics",
     "RepairLoopController",
     "evaluate_repair_loop",
+    "RepairTrainingExample",
+    "RepairBenchmarkCase",
+    "RepairBenchmarkReport",
+    "RepairVocabulary",
+    "RepairTargetVocabulary",
+    "LearnedRepairMetrics",
+    "LearnedRepairModel",
+    "ModelDrivenRepairCompiler",
+    "CorruptedProgramSpec",
+    "build_repair_training_examples",
+    "build_model_driven_repair_compiler",
+    "evaluate_model_driven_repair",
+    "generate_corrupted_programs",
+    "build_held_out_repair_benchmark",
+    "run_repair_benchmark",
 ]

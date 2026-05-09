@@ -1,4 +1,4 @@
-"""TESSERACT compiler–executor language model scaffold."""
+"""Typed execution coprocessor for exact language-model computation."""
 
 from importlib import import_module
 from types import ModuleType

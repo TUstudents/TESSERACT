@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Iterable
 
+import numpy as np
+
 from .ir import Instruction
 from .state import TraceEntry, VMState, VMValue
 
@@ -124,21 +126,36 @@ class VM:
             state.pc += 1
         elif opcode in {"ADD", "SUB", "MUL", "DIV"}:
             dst = self._require_register_index(ins.dst, ins, state.pc)
-            lhs = self._read_int_register(state, ins.src1, ins)
-            rhs = self._read_int_register(state, ins.src2, ins)
-            if opcode == "ADD":
-                result = lhs + rhs
-            elif opcode == "SUB":
-                result = lhs - rhs
-            elif opcode == "MUL":
-                result = lhs * rhs
+            if ins.type_tag == "f32":
+                lhs = self._read_float_register(state, ins.src1, ins)
+                rhs = self._read_float_register(state, ins.src2, ins)
+                if opcode == "ADD":
+                    result = lhs + rhs
+                elif opcode == "SUB":
+                    result = lhs - rhs
+                elif opcode == "MUL":
+                    result = lhs * rhs
+                else:
+                    if rhs == 0.0:
+                        raise Trap("DIV0", pc=state.pc, instruction=ins)
+                    result = lhs / rhs
+                tagged_result = self._apply_float_tag(result)
             else:
-                if rhs == 0:
-                    raise Trap("DIV0", pc=state.pc, instruction=ins)
-                result = int(lhs / rhs)
-            result = self._apply_integer_tag(result, ins.type_tag, ins, state.pc)
-            self._write_register(state, dst, result, ins, state.pc)
-            self._set_scalar_flags(state, result)
+                lhs = self._read_int_register(state, ins.src1, ins)
+                rhs = self._read_int_register(state, ins.src2, ins)
+                if opcode == "ADD":
+                    result = lhs + rhs
+                elif opcode == "SUB":
+                    result = lhs - rhs
+                elif opcode == "MUL":
+                    result = lhs * rhs
+                else:
+                    if rhs == 0:
+                        raise Trap("DIV0", pc=state.pc, instruction=ins)
+                    result = int(lhs / rhs)
+                tagged_result = self._apply_integer_tag(result, ins.type_tag, ins, state.pc)
+            self._write_register(state, dst, tagged_result, ins, state.pc)
+            self._set_scalar_flags(state, tagged_result)
             state.pc += 1
         elif opcode in {"AND", "OR", "XOR"}:
             dst = self._require_register_index(ins.dst, ins, state.pc)
@@ -170,7 +187,11 @@ class VM:
                 state.flags["lt"] = False
                 state.flags["gt"] = False
             else:
-                if type(lhs) is not int or type(rhs) is not int:
+                lhs_is_int = type(lhs) is int
+                rhs_is_int = type(rhs) is int
+                lhs_is_float = type(lhs) is float
+                rhs_is_float = type(rhs) is float
+                if not ((lhs_is_int and rhs_is_int) or (lhs_is_float and rhs_is_float)):
                     raise Trap("TYPE", pc=state.pc, instruction=ins)
                 if opcode == "CMP_LT":
                     result = lhs < rhs
@@ -263,7 +284,7 @@ class VM:
         self,
         state: VMState,
         base_register: int | None,
-        offset: int | bool | None,
+        offset: int | bool | float | None,
         ins: Instruction,
     ) -> int:
         base = self._read_int_register(state, base_register, ins)
@@ -309,9 +330,15 @@ class VM:
             raise Trap("TYPE", pc=state.pc, instruction=ins)
         return value
 
+    def _read_float_register(self, state: VMState, index: int | None, ins: Instruction) -> float:
+        value = self._read_register(state, self._require_register_index(index, ins, state.pc), ins, state.pc)
+        if type(value) is not float:
+            raise Trap("TYPE", pc=state.pc, instruction=ins)
+        return value
+
     def _coerce_immediate(
         self,
-        value: int | bool,
+        value: int | bool | float,
         type_tag: str | None,
         ins: Instruction,
         pc: int,
@@ -322,10 +349,12 @@ class VM:
             if type(value) is int and value in {0, 1}:
                 return bool(value)
             raise Trap("TYPE", pc=pc, instruction=ins)
-        if type_tag in {None, "int", "i32", "i64", "checked_i32"}:
-            if type(value) is bool:
+        if type_tag == "f32":
+            if type(value) is not float:
                 raise Trap("TYPE", pc=pc, instruction=ins)
-            if type(value) is not int:
+            return self._apply_float_tag(value)
+        if type_tag in {None, "int", "i32", "i64", "checked_i32", "checked_i64", "addr"}:
+            if type(value) is bool or type(value) is not int:
                 raise Trap("TYPE", pc=pc, instruction=ins)
             return self._apply_integer_tag(value, type_tag, ins, pc)
         raise Trap("TYPE", pc=pc, instruction=ins)
@@ -343,6 +372,10 @@ class VM:
             if type(value) is not bool:
                 raise Trap("TYPE", pc=pc, instruction=ins)
             return value
+        if type_tag == "f32":
+            if type(value) is not float:
+                raise Trap("TYPE", pc=pc, instruction=ins)
+            return self._apply_float_tag(value)
         if type(value) is not int:
             raise Trap("TYPE", pc=pc, instruction=ins)
         return self._apply_integer_tag(value, type_tag, ins, pc)
@@ -354,10 +387,14 @@ class VM:
         ins: Instruction | None,
         pc: int | None,
     ) -> int:
-        if type_tag in {None, "int", "i64"}:
+        if type_tag in {None, "int", "i64", "addr"}:
             return value
         if type_tag == "checked_i32":
             if not -(2**31) <= value < 2**31:
+                raise Trap("OVERFLOW", pc=pc, instruction=ins)
+            return value
+        if type_tag == "checked_i64":
+            if not -(2**63) <= value < 2**63:
                 raise Trap("OVERFLOW", pc=pc, instruction=ins)
             return value
         if type_tag == "i32":
@@ -366,6 +403,9 @@ class VM:
                 wrapped -= 2**32
             return wrapped
         raise Trap("TYPE", pc=pc, instruction=ins)
+
+    def _apply_float_tag(self, value: float) -> float:
+        return float(np.float32(value))
 
     def _set_scalar_flags(self, state: VMState, value: VMValue) -> None:
         zero = self._is_zero_value(value)

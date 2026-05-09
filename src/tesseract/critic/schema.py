@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from tesseract.vm.state import TraceEntry, VMState
+from tesseract.vm.state import TraceEntry, VMState, VMValue
 
 TraceStatus = Literal["success", "failure"]
 FailureType = Literal[
@@ -27,8 +27,8 @@ class TraceSummary:
     step_count: int
     final_pc: int
     trap: str | None
-    final_registers: dict[int, int | bool]
-    final_memory: dict[int, int | bool]
+    final_registers: dict[int, VMValue]
+    final_memory: dict[int, VMValue]
 
 
 @dataclass(frozen=True)

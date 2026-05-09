@@ -19,7 +19,7 @@ class NaturalLanguageCompileResult:
 class NaturalLanguageExecutionResult:
     backbone_output: BackboneOutput
     program: tuple[Instruction, ...]
-    output: int
+    output: int | bool | float
 
 
 class RepairCapableCompiler(Protocol):

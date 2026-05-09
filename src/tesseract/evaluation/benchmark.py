@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from time import perf_counter
 from typing import Any
 
 from tesseract.backbone.datasets import NaturalLanguageTask, generate_nl_tasks
 from tesseract.compiler.nl import BackboneConditionedCompiler
 from tesseract.compiler.synthetic import RESULT_REGISTER
-from tesseract.vm import Trap, VM, ValidationError, program_from_dict, program_to_dict, validate_program
+from tesseract.vm import Trap, VM, VMState, ValidationError, program_from_dict, program_to_dict, validate_program
 
 
 @dataclass(frozen=True)
@@ -40,12 +41,18 @@ class BenchmarkResult:
     canonical_prompt: str
     task_type: str
     expected_output: int
-    observed_output: int | None
+    observed_output: int | bool | float | None
     valid_program: bool
     execution_success: bool
     exact_program_match: bool
     program_length: int
     trap_kind: str | None = None
+    compile_failure_kind: str | None = None
+    trace_length: int = 0
+    gold_trace_length: int = 0
+    macro_step_efficiency: float = 0.0
+    compile_time_ms: float = 0.0
+    execute_time_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -85,6 +92,46 @@ class BenchmarkReport:
             return 0.0
         return sum(result.program_length for result in self.results) / len(self.results)
 
+    @property
+    def shortcut_rate(self) -> float:
+        if not self.results:
+            return 0.0
+        shortcuts = sum(
+            1
+            for result in self.results
+            if result.observed_output == result.expected_output and not result.exact_program_match
+        )
+        return shortcuts / len(self.results)
+
+    @property
+    def macro_step_efficiency(self) -> float:
+        if not self.results:
+            return 0.0
+        return sum(result.macro_step_efficiency for result in self.results) / len(self.results)
+
+    def compile_failure_breakdown(self) -> dict[str, float]:
+        return self._breakdown(result.compile_failure_kind for result in self.results if result.compile_failure_kind is not None)
+
+    def execution_failure_breakdown(self) -> dict[str, float]:
+        return self._breakdown(result.trap_kind for result in self.results if result.trap_kind is not None)
+
+    def trace_length_summary(self) -> dict[str, float]:
+        if not self.results:
+            return {"average_trace_length": 0.0, "average_gold_trace_length": 0.0, "max_trace_length": 0.0}
+        return {
+            "average_trace_length": sum(result.trace_length for result in self.results) / len(self.results),
+            "average_gold_trace_length": sum(result.gold_trace_length for result in self.results) / len(self.results),
+            "max_trace_length": float(max(result.trace_length for result in self.results)),
+        }
+
+    def performance_summary(self) -> dict[str, float]:
+        if not self.results:
+            return {"average_compile_time_ms": 0.0, "average_execute_time_ms": 0.0}
+        return {
+            "average_compile_time_ms": sum(result.compile_time_ms for result in self.results) / len(self.results),
+            "average_execute_time_ms": sum(result.execute_time_ms for result in self.results) / len(self.results),
+        }
+
     def task_type_metrics(self) -> dict[str, dict[str, float]]:
         metrics: dict[str, dict[str, float]] = {}
         task_types = sorted({result.task_type for result in self.results})
@@ -98,6 +145,7 @@ class BenchmarkReport:
                 / total,
                 "execution_success_rate": sum(1 for result in matching if result.execution_success) / total,
                 "exact_program_match": sum(1 for result in matching if result.exact_program_match) / total,
+                "macro_step_efficiency": sum(result.macro_step_efficiency for result in matching) / total,
             }
         return metrics
 
@@ -108,8 +156,24 @@ class BenchmarkReport:
         payload["execution_success_rate"] = self.execution_success_rate
         payload["exact_program_match"] = self.exact_program_match
         payload["average_program_length"] = self.average_program_length
+        payload["shortcut_rate"] = self.shortcut_rate
+        payload["macro_step_efficiency"] = self.macro_step_efficiency
+        payload["compile_failure_breakdown"] = self.compile_failure_breakdown()
+        payload["execution_failure_breakdown"] = self.execution_failure_breakdown()
+        payload["trace_length_summary"] = self.trace_length_summary()
+        payload["performance_summary"] = self.performance_summary()
         payload["task_type_metrics"] = self.task_type_metrics()
         return payload
+
+    def _breakdown(self, labels: Any) -> dict[str, float]:
+        counts: dict[str, int] = {}
+        total = 0
+        for label in labels:
+            counts[str(label)] = counts.get(str(label), 0) + 1
+            total += 1
+        if total == 0:
+            return {}
+        return {label: count / total for label, count in sorted(counts.items())}
 
 
 def benchmark_suite_from_dict(data: dict[str, Any]) -> BenchmarkSuite:
@@ -148,6 +212,40 @@ def build_nl_benchmark_suite(
     return BenchmarkSuite(name=name, seed=seed, tasks=tasks)
 
 
+def build_anti_shortcut_benchmark_suite(
+    *,
+    name: str = "anti_shortcut",
+    seed: int = 0,
+) -> BenchmarkSuite:
+    tasks = tuple(
+        generate_nl_tasks(
+            task_types=("arithmetic", "max", "sum_to_n", "factorial", "fibonacci", "abs", "memory_sum"),
+            operations=("add", "sub"),
+            values=(1, 2),
+            include_all_prompt_variants=True,
+            seed=seed,
+        )
+    )
+    return BenchmarkSuite(name=name, seed=seed, tasks=tasks)
+
+
+def build_macro_step_benchmark_suite(
+    *,
+    name: str = "macro_step",
+    seed: int = 0,
+) -> BenchmarkSuite:
+    tasks = tuple(
+        generate_nl_tasks(
+            task_types=("sum_to_n", "factorial", "fibonacci", "memory_sum"),
+            operations=("add",),
+            values=(1, 2, 3),
+            include_all_prompt_variants=True,
+            seed=seed,
+        )
+    )
+    return BenchmarkSuite(name=name, seed=seed, tasks=tasks)
+
+
 def run_nl_benchmark(
     compiler: BackboneConditionedCompiler,
     suite: BenchmarkSuite,
@@ -155,25 +253,35 @@ def run_nl_benchmark(
     vm: VM | None = None,
 ) -> BenchmarkReport:
     machine = vm if vm is not None else VM()
+    gold_trace_lengths = {task.prompt: _trace_length(machine, task.gold_program) for task in suite.tasks}
     results: list[BenchmarkResult] = []
     for task in suite.tasks:
+        compile_started = perf_counter()
         compile_result = compiler.compile_with_backbone_output(task.prompt)
+        compile_time_ms = (perf_counter() - compile_started) * 1000.0
         program = tuple(compile_result.program)
         valid_program = True
-        observed_output: int | None = None
+        compile_failure_kind: str | None = None
+        observed_output: int | bool | float | None = None
         execution_success = False
         trap_kind: str | None = None
+        trace_length = 0
+        execute_time_ms = 0.0
         try:
             validate_program(program)
         except ValidationError:
             valid_program = False
+            compile_failure_kind = "VALIDATION_ERROR"
         if valid_program:
-            try:
-                state = machine.execute(program)
-                observed_output = state.registers.get(task.result_register, 0)
+            execute_started = perf_counter()
+            final_state, trap_kind = _execute_with_trace(machine, program)
+            execute_time_ms = (perf_counter() - execute_started) * 1000.0
+            trace_length = len(final_state.trace)
+            if trap_kind is None:
+                observed_output = final_state.registers.get(task.result_register, 0)
                 execution_success = True
-            except Trap as trap:
-                trap_kind = trap.kind
+        gold_trace_length = gold_trace_lengths[task.prompt]
+        macro_step_efficiency = (gold_trace_length / trace_length) if trace_length else 0.0
         results.append(
             BenchmarkResult(
                 prompt=task.prompt,
@@ -186,6 +294,26 @@ def run_nl_benchmark(
                 exact_program_match=program == task.gold_program,
                 program_length=len(program),
                 trap_kind=trap_kind,
+                compile_failure_kind=compile_failure_kind,
+                trace_length=trace_length,
+                gold_trace_length=gold_trace_length,
+                macro_step_efficiency=macro_step_efficiency,
+                compile_time_ms=compile_time_ms,
+                execute_time_ms=execute_time_ms,
             )
         )
     return BenchmarkReport(suite_name=suite.name, seed=suite.seed, results=tuple(results))
+
+
+def _execute_with_trace(machine: VM, program: tuple[Any, ...]) -> tuple[VMState, str | None]:
+    state = VMState()
+    try:
+        final_state = machine.execute(program, state=state, trace=True)
+        return final_state, None
+    except Trap as trap:
+        return state, trap.kind
+
+
+def _trace_length(machine: VM, program: tuple[Any, ...]) -> int:
+    state, _ = _execute_with_trace(machine, program)
+    return len(state.trace)

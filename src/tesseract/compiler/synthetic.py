@@ -64,7 +64,7 @@ class SyntheticTask:
 
 @dataclass(frozen=True)
 class TaskExecutionResult:
-    output: int
+    output: int | bool | float
     program_length: int
     result_register: int
 

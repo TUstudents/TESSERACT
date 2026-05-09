@@ -403,6 +403,17 @@ def test_checked_i32_overflow_trap(vm: VM) -> None:
         vm.execute(program)
 
 
+def test_checked_i64_overflow_trap(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=2**63 - 1, type_tag="checked_i64"),
+        Instruction("CONST", dst=1, imm=1, type_tag="checked_i64"),
+        Instruction("ADD", dst=2, src1=0, src2=1, type_tag="checked_i64"),
+    ]
+
+    with pytest.raises(Trap, match="OVERFLOW"):
+        vm.execute(program)
+
+
 def test_i32_wraparound(vm: VM) -> None:
     program = [
         Instruction("CONST", dst=0, imm=2**31 - 1, type_tag="i32"),
@@ -431,6 +442,39 @@ def test_negative_division_truncates_toward_zero(vm: VM) -> None:
 
     assert state.registers[2] == -3
     assert state.registers[5] == -3
+
+
+def test_f32_arithmetic_and_comparison(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=1.5, type_tag="f32"),
+        Instruction("CONST", dst=1, imm=2.25, type_tag="f32"),
+        Instruction("ADD", dst=2, src1=0, src2=1, type_tag="f32"),
+        Instruction("DIV", dst=3, src1=2, src2=1, type_tag="f32"),
+        Instruction("CMP_GT", dst=4, src1=2, src2=3),
+        Instruction("HALT"),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.registers[2] == pytest.approx(3.75)
+    assert state.registers[3] == pytest.approx(1.6666666, rel=1e-5)
+    assert state.registers[4] is True
+    assert state.flags["gt"] is True
+
+
+def test_load_and_store_support_f32_and_addr_tags(vm: VM) -> None:
+    program = [
+        Instruction("CONST", dst=0, imm=10, type_tag="addr"),
+        Instruction("CONST", dst=1, imm=1.25, type_tag="f32"),
+        Instruction("STORE", src1=0, src2=1, type_tag="f32"),
+        Instruction("LOAD", dst=2, src1=0, type_tag="f32"),
+        Instruction("HALT"),
+    ]
+
+    state = vm.execute(program)
+
+    assert state.memory[10] == pytest.approx(1.25)
+    assert state.registers[2] == pytest.approx(1.25)
 
 
 def test_arithmetic_clears_eq_flag(vm: VM) -> None:

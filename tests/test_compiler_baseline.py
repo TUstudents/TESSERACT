@@ -212,6 +212,22 @@ def test_program_tokenizer_round_trip_preserves_labels() -> None:
     assert decoded == program
 
 
+def test_program_tokenizer_round_trip_supports_f32_and_addr_tags() -> None:
+    program = (
+        Instruction("CONST", dst=0, imm=12, type_tag="addr"),
+        Instruction("CONST", dst=1, imm=1.5, type_tag="f32"),
+        Instruction("STORE", src1=0, src2=1, type_tag="f32"),
+        Instruction("HALT"),
+    )
+    tasks = [SyntheticTask(prompt="typed round trip", expected_output=0, gold_program=program)]
+    tokenizer = ProgramTokenizer(build_vocabularies(tasks).program_vocab)
+
+    encoded = tokenizer.encode_program(program)
+    decoded = tokenizer.decode_tokens(encoded)
+
+    assert decoded == program
+
+
 def test_program_tokenizer_rejects_malformed_or_truncated_sequences() -> None:
     tasks = generate_synthetic_tasks(task_types=("arithmetic",), operations=("add",), values=(0, 1))
     tokenizer = ProgramTokenizer(build_vocabularies(tasks).program_vocab)

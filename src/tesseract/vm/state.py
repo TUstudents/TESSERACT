@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .ir import Instruction
 
-VMValue = int | bool
+VMValue = int | bool | float
 
 
 @dataclass(frozen=True)

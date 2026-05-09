@@ -2,29 +2,30 @@
 
 ## Purpose
 
-This document turns the current post-prototype review into a concrete, numbered implementation plan for the next development cycle.
+This document turns the current post-prototype review into a concrete, numbered implementation plan for the next development cycle under the framing: **TESSERACT is a typed execution coprocessor for exact language-model computation**.
 
 It assumes the current repository already has:
 
 - a tested Python reference VM,
 - validation, assembly, serialization, and replay tooling,
-- a synthetic compiler baseline,
-- a rule-based natural-language path,
-- a deterministic critic/repair scaffold,
+- a synthetic compiler stack with count-based and small neural decoder paths,
+- rule-based and learned natural-language backbone paths,
+- differential and learned critic paths plus model-driven repair scaffolding,
 - reproducibility and benchmark/reporting helpers.
 
-The goal of this plan is to move the repository from a well-tested scaffolded prototype toward the fuller architecture described in `docs/TESSERACT_Design_Document_v0_2.md`, without destabilizing the exact-execution core.
+The goal of this plan is to move the repository from a well-tested coprocessor prototype toward stronger learned dispatch, broader exact-computation domains, and more research-grade evaluation without destabilizing the exact-execution core.
 
 ---
 
 ## Guiding principles
 
-1. **Keep exactness in the VM.** Do not move exact symbolic behavior into the backbone.
+1. **Keep exactness behind the VM boundary.** Do not move exact symbolic behavior into the backbone.
 2. **Upgrade learned subsystems around a fixed executor.** Preserve VM, validator, tokenizer, and replay semantics while replacing placeholder models.
-3. **Expand scope incrementally.** Add one major learned or semantic capability at a time.
-4. **Preserve reproducibility.** Every new training or evaluation path must have seed control and deterministic smoke coverage.
-5. **Protect anti-shortcut guarantees.** New models must still be evaluated by emitted-program execution, not direct answer heuristics.
-6. **Require phase gates.** No phase is complete without tests, docs updates, and full-project green validation.
+3. **Treat the IR as the coprocessor contract.** Changes to opcodes, types, memory, traps, or traces must preserve validation, replay, and diagnostics.
+4. **Expand scope incrementally.** Add one major learned or semantic capability at a time.
+5. **Preserve reproducibility.** Every new training or evaluation path must have seed control and deterministic smoke coverage.
+6. **Protect anti-shortcut guarantees.** New models must still be evaluated by emitted-program execution, not direct answer heuristics.
+7. **Require phase gates.** No phase is complete without tests, docs updates, and full-project green validation.
 
 ---
 
@@ -32,14 +33,14 @@ The goal of this plan is to move the repository from a well-tested scaffolded pr
 
 Relative to `docs/TESSERACT_Design_Document_v0_2.md`, the largest remaining gaps are:
 
-1. the backbone is rule-based rather than learned,
-2. the compiler is now a small neural autoregressive decoder, but it is still narrow and not yet a strong research-grade architecture,
-3. the NL task family is still narrow,
-4. the IR/value model is still mostly scalar `int | bool`,
+1. learned components are still toy-scale and narrow, even though learned backbone, compiler, critic, and repair paths now exist,
+2. the compiler is now a small neural autoregressive decoder, but it is not yet a strong research-grade dispatch architecture,
+3. the NL task family is still narrow and mostly algorithmic,
+4. the IR/value model remains scalar-heavy despite expanded numeric and prototype address tags,
 5. sequence/string semantics are still absent,
-6. the critic is deterministic rather than learned,
-7. repair conditioning is wired but still weak,
-8. evaluation is useful but not yet a full research harness.
+6. critic and repair behavior still depends heavily on gold traces and canonical prompt recovery,
+7. evaluation is useful but not yet a full research harness with broad benchmark versioning, profiling, and scalability evidence,
+8. the coprocessor ABI needs a clearer stable contract for instruction semantics, types, traces, traps, and repair diagnostics.
 
 ---
 
@@ -190,7 +191,7 @@ Broaden the synthetic and natural-language task families so the system is tested
 
 ---
 
-## 4. Strengthen the IR and value model toward the design document
+## 4. Strengthen the IR and value model toward the design document *(completed)*
 
 ### Goal
 
@@ -243,7 +244,7 @@ Incrementally expand the executor toward the richer machine model in the design 
 
 ---
 
-## 5. Upgrade the critic from deterministic scaffold to trainable subsystem
+## 5. Upgrade the critic from deterministic scaffold to trainable subsystem *(completed)*
 
 ### Goal
 
@@ -289,7 +290,7 @@ Build a learned trace critic while keeping the current differential critic as th
 
 ---
 
-## 6. Make repair genuinely model-driven
+## 6. Make repair genuinely model-driven *(completed)*
 
 ### Goal
 
@@ -336,7 +337,7 @@ Move from scaffolded repair wiring to a real repair-conditioned compile loop.
 
 ---
 
-## 7. Harden evaluation into a research-grade experiment harness
+## 7. Harden evaluation into a research-grade experiment harness *(completed)*
 
 ### Goal
 
@@ -404,6 +405,11 @@ This order preserves the current exact-execution baseline while upgrading the le
 
 ## Immediate next action
 
-Start with **Step 4: strengthen the IR and value model toward the design document**.
+All numbered steps in this follow-on plan are now implemented.
 
-That is now the highest-leverage next change because the repository has a broader learned compiler/backbone path and expanded task coverage, but the executor is still much narrower than the design document’s richer machine model.
+The next highest-leverage work is a verification-and-quality pass on the learned stack:
+
+- strengthen the small learned repair, critic, backbone, and compiler models,
+- broaden held-out benchmark difficulty,
+- deepen experiment automation and profiling,
+- and compare stronger learned variants against the current prototype baselines.
