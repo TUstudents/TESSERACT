@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from types import MethodType
 from typing import Any, cast
 
@@ -8,10 +9,12 @@ import numpy as np
 import pytest
 import torch
 
+from tesseract.backbone.datasets import NaturalLanguageTask
+from tesseract.backbone.interface import BackboneOutput
 from tesseract.backbone import RuleBasedBackbone, generate_nl_tasks
 from tesseract.compiler import build_training_batch, build_vocabularies, train_step
-from tesseract.compiler.synthetic import make_max_task, make_sum_to_n_task, make_synthetic_task
-from tesseract.compiler.nl import BackboneConditionedCompiler
+from tesseract.compiler.nl import BackboneConditionedCompiler, NaturalLanguageCompileResult
+from tesseract.compiler.synthetic import RESULT_REGISTER, make_max_task, make_sum_to_n_task, make_synthetic_task
 from tesseract.critic import (
     DifferentialCritic,
     build_critic_training_examples,
@@ -23,6 +26,7 @@ from tesseract.critic import (
 from tesseract.critic.loop import RepairLoopController
 from tesseract.vm import Instruction, VM
 from tesseract.evaluation import (
+    BenchmarkSuite,
     benchmark_report_to_json,
     benchmark_report_to_text,
     benchmark_suite_from_json,
@@ -72,6 +76,56 @@ def _build_trained_learned_critic():
     critic = build_learned_critic()
     critic.fit(examples, epochs=256)
     return critic, examples
+
+
+@dataclass
+class StaticBenchmarkCompiler:
+    program: tuple[Instruction, ...]
+
+    def compile_with_backbone_output(
+        self,
+        prompt: str,
+        *,
+        repair_context: Any | None = None,
+    ) -> NaturalLanguageCompileResult:
+        del repair_context
+        return NaturalLanguageCompileResult(
+            backbone_output=BackboneOutput(
+                original_prompt=prompt,
+                canonical_prompt=prompt,
+                task_type="arithmetic",
+                result_register=RESULT_REGISTER,
+            ),
+            program=self.program,
+        )
+
+
+class RaisingBenchmarkCompiler:
+    def compile_with_backbone_output(
+        self,
+        prompt: str,
+        *,
+        repair_context: Any | None = None,
+    ) -> NaturalLanguageCompileResult:
+        del prompt, repair_context
+        raise ValueError("compile failed")
+
+
+def _benchmark_task(
+    *,
+    prompt: str = "same prompt",
+    expected_output: int = 0,
+    gold_program: tuple[Instruction, ...] = (Instruction("HALT"),),
+) -> NaturalLanguageTask:
+    return NaturalLanguageTask(
+        prompt=prompt,
+        canonical_prompt=prompt,
+        expected_output=expected_output,
+        gold_program=gold_program,
+        result_register=RESULT_REGISTER,
+        task_type="arithmetic",
+        values=(),
+    )
 
 
 def test_set_global_seed_is_reproducible() -> None:
@@ -134,6 +188,48 @@ def test_run_nl_benchmark_records_timeout_failures_stably() -> None:
     assert {result.trap_kind for result in report.results} == {"TIMEOUT"}
 
 
+def test_run_nl_benchmark_records_compile_exceptions() -> None:
+    suite = BenchmarkSuite(name="compile_failure", seed=0, tasks=(_benchmark_task(),))
+
+    report = run_nl_benchmark(cast(BackboneConditionedCompiler, RaisingBenchmarkCompiler()), suite)
+
+    result = report.results[0]
+    assert result.valid_program is False
+    assert result.execution_success is False
+    assert result.compile_failure_kind == "COMPILE_ERROR:ValueError"
+    assert result.gold_trace_length == 1
+    assert report.compile_validity_rate == 0.0
+
+
+def test_run_nl_benchmark_tracks_duplicate_prompt_gold_traces_by_task() -> None:
+    first = _benchmark_task(prompt="same prompt", gold_program=(Instruction("HALT"),))
+    second = _benchmark_task(
+        prompt="same prompt",
+        expected_output=1,
+        gold_program=(Instruction("CONST", dst=RESULT_REGISTER, imm=1), Instruction("HALT")),
+    )
+    suite = BenchmarkSuite(name="duplicate_prompts", seed=0, tasks=(first, second))
+    compiler = StaticBenchmarkCompiler(program=(Instruction("HALT"),))
+
+    report = run_nl_benchmark(cast(BackboneConditionedCompiler, compiler), suite)
+
+    assert [result.gold_trace_length for result in report.results] == [1, 2]
+
+
+def test_run_nl_benchmark_validates_against_vm_register_count() -> None:
+    suite = BenchmarkSuite(name="small_vm", seed=0, tasks=(_benchmark_task(),))
+    compiler = StaticBenchmarkCompiler(
+        program=(Instruction("CONST", dst=3, imm=1), Instruction("HALT")),
+    )
+
+    report = run_nl_benchmark(cast(BackboneConditionedCompiler, compiler), suite, vm=VM(register_count=2))
+
+    result = report.results[0]
+    assert result.valid_program is False
+    assert result.compile_failure_kind == "VALIDATION_ERROR"
+    assert result.execution_success is False
+
+
 def test_benchmark_report_serialization_helpers() -> None:
     compiler = _build_trained_nl_compiler()
     suite = build_nl_benchmark_suite(seed=0)
@@ -169,6 +265,17 @@ def test_anti_shortcut_benchmark_detects_corruption_degradation() -> None:
 
     assert report.faithful_execution_rate == pytest.approx(1.0)
     assert report.degradation > 0.0
+
+
+def test_anti_shortcut_benchmark_records_compile_exceptions() -> None:
+    suite = BenchmarkSuite(name="anti_shortcut_compile_failure", seed=0, tasks=(_benchmark_task(),))
+
+    report = run_anti_shortcut_benchmark(cast(BackboneConditionedCompiler, RaisingBenchmarkCompiler()), suite)
+
+    result = report.results[0]
+    assert result.exact_output is False
+    assert result.corrupted_output_matches_expected is False
+    assert result.corrupted_trap_kind == "COMPILE_ERROR:ValueError"
 
 
 def test_critic_localization_benchmark_reports_accuracy() -> None:

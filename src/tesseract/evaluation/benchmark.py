@@ -253,11 +253,31 @@ def run_nl_benchmark(
     vm: VM | None = None,
 ) -> BenchmarkReport:
     machine = vm if vm is not None else VM()
-    gold_trace_lengths = {task.prompt: _trace_length(machine, task.gold_program) for task in suite.tasks}
+    gold_trace_lengths = tuple(_trace_length(machine, task.gold_program) for task in suite.tasks)
     results: list[BenchmarkResult] = []
-    for task in suite.tasks:
+    for index, task in enumerate(suite.tasks):
         compile_started = perf_counter()
-        compile_result = compiler.compile_with_backbone_output(task.prompt)
+        try:
+            compile_result = compiler.compile_with_backbone_output(task.prompt)
+        except Exception as error:
+            compile_time_ms = (perf_counter() - compile_started) * 1000.0
+            results.append(
+                BenchmarkResult(
+                    prompt=task.prompt,
+                    canonical_prompt=task.canonical_prompt,
+                    task_type=task.task_type,
+                    expected_output=task.expected_output,
+                    observed_output=None,
+                    valid_program=False,
+                    execution_success=False,
+                    exact_program_match=False,
+                    program_length=0,
+                    compile_failure_kind=f"COMPILE_ERROR:{type(error).__name__}",
+                    gold_trace_length=gold_trace_lengths[index],
+                    compile_time_ms=compile_time_ms,
+                )
+            )
+            continue
         compile_time_ms = (perf_counter() - compile_started) * 1000.0
         program = tuple(compile_result.program)
         valid_program = True
@@ -268,7 +288,7 @@ def run_nl_benchmark(
         trace_length = 0
         execute_time_ms = 0.0
         try:
-            validate_program(program)
+            validate_program(program, register_count=machine.register_count)
         except ValidationError:
             valid_program = False
             compile_failure_kind = "VALIDATION_ERROR"
@@ -280,7 +300,7 @@ def run_nl_benchmark(
             if trap_kind is None:
                 observed_output = final_state.registers.get(task.result_register, 0)
                 execution_success = True
-        gold_trace_length = gold_trace_lengths[task.prompt]
+        gold_trace_length = gold_trace_lengths[index]
         macro_step_efficiency = (gold_trace_length / trace_length) if trace_length else 0.0
         results.append(
             BenchmarkResult(

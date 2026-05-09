@@ -15,7 +15,7 @@ from tesseract.critic import (
     run_repair_benchmark,
 )
 from tesseract.compiler.nl import BackboneConditionedCompiler, RepairCapableCompiler
-from tesseract.vm import Trap, VM, validate_program
+from tesseract.vm import Trap, VM, ValidationError, validate_program
 
 import json
 
@@ -190,20 +190,32 @@ def run_anti_shortcut_benchmark(
     exact_report = run_nl_benchmark(compiler, suite, vm=machine)
     results: list[AntiShortcutResult] = []
     for task, result in zip(suite.tasks, exact_report.results, strict=True):
-        compile_result = compiler.compile_with_backbone_output(task.prompt)
+        try:
+            compile_result = compiler.compile_with_backbone_output(task.prompt)
+        except Exception as error:
+            results.append(
+                AntiShortcutResult(
+                    prompt=task.prompt,
+                    task_type=task.task_type,
+                    exact_output=result.observed_output == task.expected_output,
+                    corrupted_output_matches_expected=False,
+                    corrupted_trap_kind=f"COMPILE_ERROR:{type(error).__name__}",
+                )
+            )
+            continue
         corruptions = generate_corrupted_programs(compile_result.program, corruption_names=corruption_names)
         corrupted_matches = False
         corrupted_trap: str | None = None
         if corruptions:
             candidate = corruptions[0].program
             try:
-                validate_program(candidate)
+                validate_program(candidate, register_count=machine.register_count)
                 try:
                     state = machine.execute(candidate)
                     corrupted_matches = state.registers.get(task.result_register) == task.expected_output
                 except Trap as trap:
                     corrupted_trap = trap.kind
-            except Exception:
+            except ValidationError:
                 corrupted_trap = "VALIDATION_ERROR"
         results.append(
             AntiShortcutResult(
