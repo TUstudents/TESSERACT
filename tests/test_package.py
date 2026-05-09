@@ -1,5 +1,7 @@
 import importlib
 import sys
+import tomllib
+from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -7,7 +9,15 @@ import tesseract
 
 
 def test_package_imports() -> None:
-    assert tesseract.__all__ == ["backbone", "compiler", "vm", "critic"]
+    assert tesseract.__all__ == ["backbone", "compiler", "vm", "critic", "evaluation", "__version__"]
+    assert tesseract.evaluation is not None
+
+
+def test_package_version_matches_project_metadata() -> None:
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    metadata = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+
+    assert tesseract.__version__ == metadata["project"]["version"] == "2.0.0"
 
 
 def test_vm_submodule_imports() -> None:

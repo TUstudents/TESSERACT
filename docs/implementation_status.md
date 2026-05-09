@@ -13,6 +13,8 @@ Related documents:
 
 ## Summary
 
+Current package release: `2.0.0`.
+
 The repository has completed the full prototype roadmap currently tracked in the implementation plan:
 
 - Phase 0 — repository bootstrap and test harness hardening
@@ -454,10 +456,12 @@ Implemented baseline pieces:
 - repair-conditioned recompilation hook
 - multi-round loop controller
 - repair metrics and convergence analysis
+- small model-driven repair compiler with held-out repair benchmarking
+- validation for malformed or empty repair-training inputs
 
 Still missing:
 
-- learned repair policies
+- stronger learned repair policies beyond the current small prototype
 - stronger repair-context compression
 - larger repair benchmarks with harder corruptions
 
@@ -468,6 +472,9 @@ Implemented baseline pieces:
 - fixed-seed controls
 - fixed NL benchmark suite generation
 - benchmark reporting in JSON/text forms
+- experiment manifests and research report serialization
+- anti-shortcut checks and macro-step benchmark summaries
+- structured compile/runtime failure reporting for benchmark runs
 
 Still missing:
 

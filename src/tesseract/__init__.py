@@ -5,6 +5,8 @@ from types import ModuleType
 
 from . import backbone, critic, vm
 
+__version__ = "2.0.0"
+
 _OPTIONAL_RUNTIME_DEPENDENCIES = {"numpy", "torch"}
 
 
@@ -25,4 +27,6 @@ __all__ = [
     "compiler",
     "vm",
     "critic",
+    "evaluation",
+    "__version__",
 ]

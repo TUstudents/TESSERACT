@@ -4,6 +4,8 @@ A typed execution coprocessor for exact language-model computation.
 
 TESSERACT separates probabilistic language understanding from deterministic execution. The language-model side compiles intent into a typed intermediate representation (IR); the VM validates and executes that IR exactly; the critic and repair loop turn traps, trace mismatches, and output failures into structured feedback for another dispatch attempt.
 
+Current package release: `2.0.0`.
+
 ## Documentation
 
 - `docs/TESSERACT_Design_Document_v0_2.md` — architecture, theory, and full design proposal
@@ -53,5 +55,7 @@ Current reference-VM policy:
 ## Status
 
 The repository now includes a tested VM/IR core with expanded type coverage (`checked_i64`, `f32`, and prototype `addr` tagging), validation/assembly/serialization tooling, a synthetic compiler stack with a small neural autoregressive decoder plus a retained count-based baseline for comparison, both rule-based and learned NL backbone paths, broader task coverage spanning arithmetic/control-flow/loop/memory families, differential and learned critic paths, model-driven repair support with held-out repair benchmarks, and a richer research-oriented evaluation/reporting harness with experiment manifests, anti-shortcut checks, critic-localization benchmarking, and macro-step summaries.
+
+The top-level package exports the public subsystem modules `backbone`, `compiler`, `vm`, `critic`, and `evaluation`, plus `__version__`.
 
 The current prototype is strongest as a deterministic coprocessor substrate and evaluation scaffold. The next major milestones are deeper learned-model quality, broader task domains such as sequences and strings, and stronger evidence that the model-side compiler can reliably dispatch useful exact computations through the typed VM boundary.
