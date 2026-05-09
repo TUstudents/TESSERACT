@@ -15,6 +15,8 @@ from .differential import DifferentialCritic
 from .loop import RepairLoopController, RepairLoopMetrics, RepairLoopResult, evaluate_repair_loop
 from .repair import RepairState, build_repair_state, repair_state_feature_dim
 
+_REPAIR_RESERVED_TOKENS = {"<pad>", "<unk>"}
+
 
 @dataclass(frozen=True)
 class RepairTrainingExample:
@@ -88,7 +90,12 @@ class RepairVocabulary:
 
     @classmethod
     def from_examples(cls, examples: Sequence[RepairTrainingExample]) -> RepairVocabulary:
-        tokens = sorted({token for example in examples for token in example.prompt.lower().split()})
+        tokens = sorted({
+            token
+            for example in examples
+            for token in example.prompt.lower().split()
+            if token not in _REPAIR_RESERVED_TOKENS
+        })
         itos = ["<pad>", "<unk>", *tokens]
         return cls(stoi={token: index for index, token in enumerate(itos)}, itos=itos)
 
@@ -112,6 +119,8 @@ class RepairTargetVocabulary:
     @classmethod
     def from_examples(cls, examples: Sequence[RepairTrainingExample]) -> RepairTargetVocabulary:
         prompts = sorted({example.target_canonical_prompt for example in examples})
+        if not prompts:
+            raise ValueError("repair target vocabulary requires at least one target canonical prompt")
         return cls(stoi={prompt: index for index, prompt in enumerate(prompts)}, itos=prompts)
 
     @property
@@ -301,6 +310,8 @@ def build_model_driven_repair_compiler(
     delegate: BackboneConditionedCompiler,
     examples: Sequence[RepairTrainingExample],
 ) -> ModelDrivenRepairCompiler:
+    if not examples:
+        raise ValueError("model-driven repair compiler requires at least one training example")
     vocabulary = RepairVocabulary.from_examples(examples)
     target_vocabulary = RepairTargetVocabulary.from_examples(examples)
     model = LearnedRepairModel(vocabulary=vocabulary, target_vocabulary=target_vocabulary)

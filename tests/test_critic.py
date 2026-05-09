@@ -6,6 +6,7 @@ import pytest
 
 from tesseract.compiler.synthetic import make_max_task, make_sum_to_n_task, make_synthetic_task
 from tesseract.critic import (
+    CriticTrainingExample,
     DifferentialCritic,
     FinalMemoryInvariant,
     FinalRegisterInvariant,
@@ -299,6 +300,62 @@ def test_build_critic_training_examples_is_deterministic_and_mixed() -> None:
     assert first == second
     assert any(example.failure_type == "SUCCESS" for example in first)
     assert any(example.failure_type != "SUCCESS" for example in first)
+
+
+def test_learned_critic_rejects_invalid_trace_payloads() -> None:
+    critic = build_learned_critic()
+    gold_state = VMState(halted=True, halt_reason="HALT")
+
+    with pytest.raises(TypeError, match="TraceEntry"):
+        critic.compare(cast(Any, ["not-a-trace-entry"]), gold_state)
+
+
+def test_learned_critic_validates_training_examples() -> None:
+    critic = build_learned_critic()
+    report = DifferentialCritic().compare(
+        VMState(halted=True, halt_reason="HALT"),
+        VMState(halted=True, halt_reason="HALT"),
+    )
+    valid_features = (0.0,) * critic.model.input_dim
+
+    with pytest.raises(ValueError, match="feature length"):
+        critic.fit(
+            [
+                CriticTrainingExample(
+                    features=(0.0,),
+                    failure_type="SUCCESS",
+                    first_failing_step=None,
+                    oracle_report=report,
+                )
+            ],
+            epochs=1,
+        )
+
+    with pytest.raises(ValueError, match="unknown failure_type"):
+        critic.fit(
+            [
+                CriticTrainingExample(
+                    features=valid_features,
+                    failure_type=cast(Any, "NOPE"),
+                    first_failing_step=None,
+                    oracle_report=report,
+                )
+            ],
+            epochs=1,
+        )
+
+    with pytest.raises(ValueError, match="negative first_failing_step"):
+        critic.fit(
+            [
+                CriticTrainingExample(
+                    features=valid_features,
+                    failure_type="WRONG_REGISTER",
+                    first_failing_step=-1,
+                    oracle_report=report,
+                )
+            ],
+            epochs=1,
+        )
 
 
 @pytest.fixture(scope="module")

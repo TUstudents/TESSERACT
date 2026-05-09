@@ -12,7 +12,7 @@ from tesseract.vm import Instruction, TraceEntry, Trap, VM, VMState
 from .differential import DifferentialCritic
 from .interface import Critic, CriticInput
 from .repair import build_repair_prompt
-from .schema import CriticReport, FailureType, summarize_trace
+from .schema import CriticReport, FailureType, coerce_trace_entries, summarize_trace
 
 _FAILURE_TYPES: tuple[FailureType, ...] = (
     "SUCCESS",
@@ -157,6 +157,7 @@ class LearnedCritic(Critic):
     def fit(self, examples: Sequence[CriticTrainingExample], *, epochs: int = 256) -> dict[str, float]:
         if not examples:
             return {"loss": 0.0, "failure_type_accuracy": 0.0, "first_step_accuracy": 0.0}
+        self._validate_training_examples(examples)
 
         feature_batch = torch.tensor([example.features for example in examples], dtype=torch.float32, device=self.model.device)
         failure_targets = torch.tensor(
@@ -245,7 +246,7 @@ class LearnedCritic(Critic):
     def _coerce_state(self, trace_or_state: CriticInput) -> VMState:
         if isinstance(trace_or_state, VMState):
             return trace_or_state
-        state = VMState(trace=list(trace_or_state))
+        state = VMState(trace=coerce_trace_entries(trace_or_state))
         if state.trace:
             last = state.trace[-1]
             state.registers = dict(last.post_state["registers"])
@@ -258,6 +259,18 @@ class LearnedCritic(Critic):
             state.halt_reason = last.post_state["halt_reason"]
             state.step_count = int(last.post_state["step_count"])
         return state
+
+    def _validate_training_examples(self, examples: Sequence[CriticTrainingExample]) -> None:
+        expected_dim = self.model.input_dim
+        for index, example in enumerate(examples):
+            if len(example.features) != expected_dim:
+                raise ValueError(
+                    f"critic training example {index} has feature length {len(example.features)}; expected {expected_dim}"
+                )
+            if example.failure_type not in _FAILURE_TYPES:
+                raise ValueError(f"critic training example {index} has unknown failure_type {example.failure_type!r}")
+            if example.first_failing_step is not None and example.first_failing_step < 0:
+                raise ValueError(f"critic training example {index} has negative first_failing_step")
 
     def _encode_step(self, step: int | None) -> int:
         if step is None or step >= self.feature_extractor.max_trace_steps:

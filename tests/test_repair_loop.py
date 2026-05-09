@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
 
@@ -12,6 +13,8 @@ from tesseract.critic import (
     DifferentialCritic,
     RepairLoopController,
     RepairState,
+    RepairTrainingExample,
+    RepairVocabulary,
     build_held_out_repair_benchmark,
     build_model_driven_repair_compiler,
     build_repair_state,
@@ -210,6 +213,36 @@ def test_repair_state_round_trips_and_exposes_features() -> None:
     assert restored == repair_state
     assert "failure=" in repair_state.to_text()
     assert len(repair_state.feature_vector()) > 0
+
+
+def test_repair_vocabulary_keeps_reserved_tokens_reserved() -> None:
+    task = generate_nl_tasks(task_types=("arithmetic",), operations=("add",), values=(2,), seed=0)[0]
+    report = DifferentialCritic().compare_programs(
+        VM(),
+        (Instruction("CONST", dst=0, imm=1),),
+        task.gold_program,
+        task_prompt=task.prompt,
+    )
+    example = RepairTrainingExample(
+        prompt="<pad> add <unk> add",
+        repair_state=build_repair_state(report),
+        target_canonical_prompt=task.canonical_prompt,
+        gold_program=task.gold_program,
+        task_type=task.task_type,
+        corruption_name="reserved-token-prompt",
+    )
+
+    vocabulary = RepairVocabulary.from_examples((example,))
+
+    assert vocabulary.itos[:2] == ["<pad>", "<unk>"]
+    assert vocabulary.itos.count("<pad>") == 1
+    assert vocabulary.itos.count("<unk>") == 1
+    assert vocabulary.encode("<pad> <unk> add") == [0, 1, vocabulary.stoi["add"]]
+
+
+def test_model_driven_repair_compiler_rejects_empty_training_examples() -> None:
+    with pytest.raises(ValueError, match="at least one training example"):
+        build_model_driven_repair_compiler(cast(BackboneConditionedCompiler, object()), ())
 
 
 def test_model_driven_repair_improves_held_out_failures() -> None:
